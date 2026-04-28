@@ -48,7 +48,9 @@ jobs:
 
       - name: Extract version
         id: version
-        run: echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+        run: |
+          RAW="${{ inputs.tag }}"
+          echo "version=${RAW#v}" >> "$GITHUB_OUTPUT"
 
       - name: Package deb
         run: |
