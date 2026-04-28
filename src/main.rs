@@ -657,6 +657,20 @@ async fn main() -> anyhow::Result<()> {
     // This monitors state change events and broadcasts DeviceInfo to all clients
     spawn_device_info_broadcaster(state.clone(), events);
 
+    // Start IPMI server (optional, reuses ATX controller for power control)
+    if config.ipmi.enabled {
+        let ipmi_service =
+            one_kvm::ipmi::IpmiService::new(state.atx.clone(), config.ipmi.clone());
+        tokio::spawn(async move {
+            if let Err(e) = ipmi_service.start().await {
+                tracing::error!("IPMI server error: {}", e);
+            }
+        });
+        tracing::info!("IPMI server enabled on port {}", config.ipmi.port);
+    } else {
+        tracing::info!("IPMI server disabled in configuration");
+    }
+
     // Create router
     let app = web::create_router(state.clone());
 

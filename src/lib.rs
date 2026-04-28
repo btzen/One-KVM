@@ -11,6 +11,7 @@ pub mod error;
 pub mod events;
 pub mod extensions;
 pub mod hid;
+pub mod ipmi;
 pub mod modules;
 pub mod msd;
 pub mod otg;

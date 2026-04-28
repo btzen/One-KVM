@@ -109,6 +109,12 @@ ventoy-img = { path = "libs/ventoy-img-rs" }
 # ATX (GPIO control)
 gpio-cdev = "0.6"
 
+# IPMI 2.0 RMCP+ authentication and encryption
+sha1 = "0.10"
+hmac = "0.12"
+aes = "0.8"
+num-bigint-dig = "0.8"
+
 # H264 hardware/software encoding (hwcodec from rustdesk)
 hwcodec = { path = "libs/hwcodec" }
 

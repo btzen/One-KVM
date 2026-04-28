@@ -25,6 +25,8 @@ pub struct AppConfig {
     pub msd: MsdConfig,
     /// ATX power control settings
     pub atx: AtxConfig,
+    /// IPMI server settings
+    pub ipmi: IpmiConfig,
     /// Audio settings
     pub audio: AudioConfig,
     /// Streaming settings
@@ -487,6 +489,32 @@ impl AtxConfig {
             power: self.power.clone(),
             reset: self.reset.clone(),
             led: self.led.clone(),
+        }
+    }
+}
+
+/// IPMI 2.0 RMCP+ LAN server configuration
+#[typeshare]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IpmiConfig {
+    /// Enable IPMI server
+    pub enabled: bool,
+    /// UDP listen port (default 623)
+    pub port: u16,
+    /// IPMI username
+    pub username: String,
+    /// IPMI password
+    pub password: String,
+}
+
+impl Default for IpmiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: 623,
+            username: "admin".to_string(),
+            password: "admin".to_string(),
         }
     }
 }
