@@ -1,0 +1,147 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.9)"
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            deb_arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            deb_arch: arm64
+          - target: armv7-unknown-linux-gnueabihf
+            deb_arch: armhf
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install cross
+        run: cargo install cross --locked
+
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Extract version
+        id: version
+        run: echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Package deb
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          DEB_ARCH="${{ matrix.deb_arch }}"
+          BINARY="target/$TARGET/release/one-kvm"
+          PKG_DIR="/tmp/one-kvm-pkg"
+
+          mkdir -p "$PKG_DIR/DEBIAN" \
+                    "$PKG_DIR/usr/bin" \
+                    "$PKG_DIR/etc/one-kvm/ventoy" \
+                    "$PKG_DIR/lib/systemd/system"
+
+          cp "$BINARY" "$PKG_DIR/usr/bin/one-kvm"
+          chmod 755 "$PKG_DIR/usr/bin/one-kvm"
+
+          if [ -d libs/ventoy-img-rs/resources ]; then
+            for file in libs/ventoy-img-rs/resources/*; do
+              [ -f "$file" ] || continue
+              name=$(basename "$file")
+              if [[ "$name" == *.xz ]]; then
+                xz -d -c "$file" > "$PKG_DIR/etc/one-kvm/ventoy/${name%.xz}"
+              else
+                cp "$file" "$PKG_DIR/etc/one-kvm/ventoy/"
+              fi
+            done
+          fi
+
+          cp build/one-kvm.service "$PKG_DIR/lib/systemd/system/"
+
+          cat > "$PKG_DIR/DEBIAN/postinst" <<'SCRIPT'
+          #!/bin/bash
+          set -e
+          case "$1" in
+              configure)
+                  systemctl enable one-kvm
+                  systemctl start one-kvm || true
+                  ;;
+          esac
+          exit 0
+          SCRIPT
+          chmod 755 "$PKG_DIR/DEBIAN/postinst"
+
+          cat > "$PKG_DIR/DEBIAN/prerm" <<'SCRIPT'
+          #!/bin/bash
+          set -e
+          case "$1" in
+              remove|deconfigure)
+                  systemctl stop one-kvm || true
+                  systemctl disable one-kvm || true
+                  ;;
+              upgrade)
+                  systemctl stop one-kvm || true
+                  ;;
+          esac
+          exit 0
+          SCRIPT
+          chmod 755 "$PKG_DIR/DEBIAN/prerm"
+
+          BASE_DEPS="libc6 (>= 2.31), libgcc-s1, libstdc++6, libasound2 (>= 1.1), libdrm2 (>= 2.4)"
+          AMD64_DEPS="libva2 (>= 2.0), libva-drm2 (>= 2.10), libva-x11-2 (>= 2.10), libmfx1 (>= 21.1), libx11-6 (>= 1.6), libxcb1 (>= 1.14), i965-va-driver-shaders (>= 2.4), intel-media-va-driver-non-free (>= 21.1)"
+          DEPS="$BASE_DEPS"
+          if [ "$DEB_ARCH" = "amd64" ]; then
+            DEPS="$DEPS, $AMD64_DEPS"
+          fi
+
+          cat > "$PKG_DIR/DEBIAN/control" <<EOF
+          Package: one-kvm
+          Version: $VERSION
+          Section: admin
+          Priority: optional
+          Architecture: $DEB_ARCH
+          Depends: $DEPS
+          Maintainer: SilentWind <admin@mofeng.run>
+          Description: A open and lightweight IP-KVM solution
+           Enables BIOS-level remote management of servers and workstations.
+           Built on Debian 11, compatible with Debian 11+, Ubuntu 20.04+.
+          EOF
+
+          DEB_NAME="one-kvm_${VERSION}_${DEB_ARCH}.deb"
+          dpkg-deb --build "$PKG_DIR" "$DEB_NAME"
+          rm -rf "$PKG_DIR"
+          echo "deb_name=$DEB_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.deb_arch }}
+          path: one-kvm_${{ steps.version.outputs.version }}_${{ matrix.deb_arch }}.deb
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: debs
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag }}
+          generate_release_notes: true
+          files: debs/*.deb
