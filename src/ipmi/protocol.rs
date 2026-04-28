@@ -52,6 +52,7 @@ pub const CC_OK: u8 = 0x00;
 pub const CC_INVALID_COMMAND: u8 = 0xC1;
 #[allow(dead_code)]
 pub const CC_INVALID_DATA: u8 = 0xCC;
+pub const CC_COMMAND_NOT_SUPPORTED_IN_PRESENT_STATE: u8 = 0xD5;
 
 pub const BMC_SLAVE_ADDR: u8 = 0x20;
 
@@ -233,9 +234,9 @@ impl IpmiMessage {
 #[derive(Debug)]
 pub struct RmcppSessionHeader {
     pub auth_type: u8,
-    pub session_seq: u32,
-    pub session_id: u32,
     pub payload_type: u8,
+    pub session_id: u32,
+    pub session_seq: u32,
     pub payload_length: u16,
 }
 
@@ -246,18 +247,18 @@ impl RmcppSessionHeader {
         }
         Some(Self {
             auth_type: buf[0],
-            session_seq: u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]),
-            session_id: u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]),
-            payload_type: buf[9],
+            payload_type: buf[1],
+            session_id: u32::from_le_bytes([buf[2], buf[3], buf[4], buf[5]]),
+            session_seq: u32::from_le_bytes([buf[6], buf[7], buf[8], buf[9]]),
             payload_length: u16::from_le_bytes([buf[10], buf[11]]),
         })
     }
 
     pub fn write(&self, out: &mut Vec<u8>) {
         out.push(self.auth_type);
-        out.extend_from_slice(&self.session_seq.to_le_bytes());
-        out.extend_from_slice(&self.session_id.to_le_bytes());
         out.push(self.payload_type);
+        out.extend_from_slice(&self.session_id.to_le_bytes());
+        out.extend_from_slice(&self.session_seq.to_le_bytes());
         out.extend_from_slice(&self.payload_length.to_le_bytes());
     }
 
@@ -271,5 +272,39 @@ impl RmcppSessionHeader {
 
     pub fn payload_type_raw(&self) -> u8 {
         self.payload_type & 0x3F
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rmcpp_session_header_uses_standard_field_order() {
+        let bytes = [
+            AUTH_TYPE_RMCP_PLUS,
+            PAYLOAD_TYPE_IPMI | PAYLOAD_FLAG_AUTHENTICATED,
+            0x44,
+            0x33,
+            0x22,
+            0x11,
+            0x88,
+            0x77,
+            0x66,
+            0x55,
+            0x10,
+            0x00,
+        ];
+
+        let header = RmcppSessionHeader::read(&bytes).expect("header");
+        assert_eq!(header.auth_type, AUTH_TYPE_RMCP_PLUS);
+        assert_eq!(header.payload_type, PAYLOAD_TYPE_IPMI | PAYLOAD_FLAG_AUTHENTICATED);
+        assert_eq!(header.session_id, 0x1122_3344);
+        assert_eq!(header.session_seq, 0x5566_7788);
+        assert_eq!(header.payload_length, 0x0010);
+
+        let mut out = Vec::new();
+        header.write(&mut out);
+        assert_eq!(out, bytes);
     }
 }

@@ -32,6 +32,71 @@ pub use crate::config::IpmiConfig;
 
 const MAX_PACKET_SIZE: usize = 4096;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IpmiPowerState {
+    On,
+    Off,
+    Unknown,
+}
+
+impl From<PowerStatus> for IpmiPowerState {
+    fn from(value: PowerStatus) -> Self {
+        match value {
+            PowerStatus::On => Self::On,
+            PowerStatus::Off => Self::Off,
+            PowerStatus::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlannedPowerAction {
+    NoOp,
+    PowerShort,
+    PowerLong,
+    Reset,
+}
+
+fn build_chassis_status_payload(state: IpmiPowerState) -> Result<[u8; 4], u8> {
+    match state {
+        IpmiPowerState::On => Ok([0x01, 0x00, 0x00, 0x00]),
+        IpmiPowerState::Off => Ok([0x00, 0x00, 0x00, 0x00]),
+        IpmiPowerState::Unknown => Err(CC_COMMAND_NOT_SUPPORTED_IN_PRESENT_STATE),
+    }
+}
+
+fn plan_chassis_control(action: u8, state: IpmiPowerState) -> Result<PlannedPowerAction, u8> {
+    match action {
+        0x00 | 0x01 | 0x03 => {}
+        _ => return Err(CC_INVALID_DATA),
+    }
+
+    match (action, state) {
+        (_, IpmiPowerState::Unknown) => Err(CC_COMMAND_NOT_SUPPORTED_IN_PRESENT_STATE),
+        (0x00, IpmiPowerState::On) => Ok(PlannedPowerAction::PowerLong),
+        (0x00, IpmiPowerState::Off) => Ok(PlannedPowerAction::NoOp),
+        (0x01, IpmiPowerState::On) => Ok(PlannedPowerAction::NoOp),
+        (0x01, IpmiPowerState::Off) => Ok(PlannedPowerAction::PowerShort),
+        (0x03, IpmiPowerState::On) => Ok(PlannedPowerAction::Reset),
+        (0x03, IpmiPowerState::Off) => Ok(PlannedPowerAction::NoOp),
+        _ => Err(CC_INVALID_DATA),
+    }
+}
+
+fn validate_rmcpp_icv(full_payload: &[u8], k1: &[u8; 20]) -> bool {
+    const ICV_LEN: usize = 12;
+
+    if full_payload.len() < 12 + 2 + ICV_LEN {
+        return false;
+    }
+
+    let Some(authcode_offset) = full_payload.len().checked_sub(ICV_LEN) else {
+        return false;
+    };
+    let expected = crypto::compute_session_icv(k1, &full_payload[..authcode_offset]);
+    crypto::ct_eq(&expected, &full_payload[authcode_offset..])
+}
+
 pub struct IpmiService {
     atx: Arc<RwLock<Option<AtxController>>>,
     config: IpmiConfig,
@@ -139,7 +204,7 @@ impl IpmiService {
             CMD_GET_CHANNEL_CIPHER_SUITES => {
                 let resp_msg = msg.build_response(CC_OK, vec![
                     CHANNEL_CURRENT,
-                    0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+                    0xC0, 0x03, 0x01, 0x01, 0x01,
                 ]);
                 self.wrap_v15_response(rmcp, &resp_msg, payload)
             }
@@ -162,9 +227,10 @@ impl IpmiService {
     ) -> Option<Vec<u8>> {
         let resp_msg = msg.build_response(CC_OK, vec![
             CHANNEL_CURRENT,
-            0x20,
-            0x00,
-            0x00,
+            0x84,
+            0x04,
+            0x03,
+            0x00, 0x00, 0x00,
             0x00,
         ]);
         self.wrap_v15_response(rmcp, &resp_msg, req_payload)
@@ -235,7 +301,11 @@ impl IpmiService {
         session.auth_algo = req.auth_algo;
         session.integrity_algo = req.integrity_algo;
         session.conf_algo = req.conf_algo;
-        session.privilege = req.privilege;
+        session.privilege = if req.privilege == 0 {
+            PRIV_ADMINISTRATOR
+        } else {
+            req.privilege.min(PRIV_ADMINISTRATOR)
+        };
         session.touch();
 
         debug!(
@@ -249,9 +319,9 @@ impl IpmiService {
         RmcpHeader::new_ipmi(rmcp.sequence).write(&mut out);
         let resp_hdr = RmcppSessionHeader {
             auth_type: AUTH_TYPE_RMCP_PLUS,
-            session_seq: 0,
-            session_id: 0,
             payload_type: PAYLOAD_TYPE_OPEN_SESSION_RSP,
+            session_id: 0,
+            session_seq: 0,
             payload_length: resp_payload.len() as u16,
         };
         resp_hdr.write(&mut out);
@@ -287,9 +357,9 @@ impl IpmiService {
         RmcpHeader::new_ipmi(rmcp.sequence).write(&mut out);
         let resp_hdr = RmcppSessionHeader {
             auth_type: AUTH_TYPE_RMCP_PLUS,
-            session_seq: 0,
-            session_id: console_session_id,
             payload_type: PAYLOAD_TYPE_RAKP_2,
+            session_id: console_session_id,
+            session_seq: 0,
             payload_length: resp_payload.len() as u16,
         };
         resp_hdr.write(&mut out);
@@ -308,7 +378,12 @@ impl IpmiService {
         debug!("IPMI: RAKP3 bmc_sid=0x{:08x}", rakp3.bmc_session_id);
 
         let mut sessions = self.sessions.write().await;
-        let (sid, resp_payload) = rmcpp::handle_rakp3(&mut sessions, &rakp3)?;
+        let (sid, resp_payload) = rmcpp::handle_rakp3(
+            &mut sessions,
+            &rakp3,
+            self.config.password.as_bytes(),
+            &self.bmc_guid,
+        )?;
 
         let session = sessions.get_session(sid)?;
         let console_sid = session.console_session_id;
@@ -317,9 +392,9 @@ impl IpmiService {
         RmcpHeader::new_ipmi(rmcp.sequence).write(&mut out);
         let resp_hdr = RmcppSessionHeader {
             auth_type: AUTH_TYPE_RMCP_PLUS,
-            session_seq: 0,
-            session_id: console_sid,
             payload_type: PAYLOAD_TYPE_RAKP_4,
+            session_id: console_sid,
+            session_seq: 0,
             payload_length: resp_payload.len() as u16,
         };
         resp_hdr.write(&mut out);
@@ -355,13 +430,20 @@ impl IpmiService {
             if !session.is_active {
                 return None;
             }
+            session.client_seq = hdr.session_seq;
             session.touch();
-            (
-                session.k1?,
-                session.k2?,
-                session.console_session_id,
-            )
+            (session.k1?, session.k2?, session.console_session_id)
         };
+
+        if !hdr.is_authenticated() {
+            warn!("IPMI: rejecting unauthenticated active-session packet");
+            return None;
+        }
+
+        if !validate_rmcpp_icv(_full_payload, &k1) {
+            warn!("IPMI: rejecting packet with invalid session authcode");
+            return None;
+        }
 
         let ipmi_msg_bytes = if hdr.is_encrypted() {
             let iv = payload_data.get(..16)?;
@@ -401,12 +483,10 @@ impl IpmiService {
         hdr: &RmcppSessionHeader,
         msg: &IpmiMessage,
     ) -> Option<Vec<u8>> {
-        let resp_data = vec![
-            CC_OK,
+        let resp_msg = msg.build_response(CC_OK, vec![
             CHANNEL_CURRENT,
-            0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
-        ];
-        let resp_msg = msg.build_response(CC_OK, resp_data[1..].to_vec());
+            0xC0, 0x03, 0x01, 0x01, 0x01,
+        ]);
         self.build_rmcpp_plain_response(rmcp, hdr, &resp_msg)
     }
 
@@ -425,20 +505,26 @@ impl IpmiService {
                 msg.build_response(CC_OK, self.device_id_data())
             }
             (NETFN_CHASSIS_REQ, CMD_GET_CHASSIS_STATUS) => {
-                let power_on = self.get_power_status().await;
-                debug!("IPMI: chassis status -> power_on={}", power_on);
-                let state = if power_on { 0x01u8 } else { 0x00u8 };
-                msg.build_response(CC_OK, vec![state, 0x00, 0x00, 0x00])
+                let state = self.get_power_state().await;
+                debug!("IPMI: chassis status -> {:?}", state);
+                match build_chassis_status_payload(state) {
+                    Ok(payload) => msg.build_response(CC_OK, payload.to_vec()),
+                    Err(completion_code) => msg.build_response(completion_code, vec![]),
+                }
             }
             (NETFN_CHASSIS_REQ, CMD_CHASSIS_CONTROL) => {
                 let action = msg.data.first().copied().unwrap_or(0xFF);
-                debug!("IPMI: chassis control action=0x{:02x}", action);
-                match self.exec_chassis_action(action).await {
-                    Ok(()) => msg.build_response(CC_OK, vec![]),
-                    Err(e) => {
-                        warn!("IPMI: chassis control failed: {}", e);
-                        msg.build_response(0xFF, vec![])
-                    }
+                let state = self.get_power_state().await;
+                debug!("IPMI: chassis control action=0x{:02x} state={:?}", action, state);
+                match plan_chassis_control(action, state) {
+                    Ok(plan) => match self.exec_planned_power_action(plan).await {
+                        Ok(()) => msg.build_response(CC_OK, vec![]),
+                        Err(e) => {
+                            warn!("IPMI: chassis control failed: {}", e);
+                            msg.build_response(0xFF, vec![])
+                        }
+                    },
+                    Err(completion_code) => msg.build_response(completion_code, vec![]),
                 }
             }
             _ => {
@@ -455,36 +541,32 @@ impl IpmiService {
     // ATX power actions
     // ════════════════════════════════════════
 
-    async fn exec_chassis_action(&self, action: u8) -> crate::error::Result<()> {
+    async fn exec_planned_power_action(
+        &self,
+        action: PlannedPowerAction,
+    ) -> crate::error::Result<()> {
         match action {
-            0x00 => {
-                debug!("IPMI: power down (long press)");
-                self.atx_power_long().await
-            }
-            0x01 => {
+            PlannedPowerAction::NoOp => Ok(()),
+            PlannedPowerAction::PowerShort => {
                 debug!("IPMI: power up (short press)");
                 self.atx_power_short().await
             }
-            0x02 | 0x03 => {
-                debug!("IPMI: power cycle / hard reset");
+            PlannedPowerAction::PowerLong => {
+                debug!("IPMI: power down (long press)");
+                self.atx_power_long().await
+            }
+            PlannedPowerAction::Reset => {
+                debug!("IPMI: hard reset");
                 self.atx_reset().await
             }
-            0x05 => {
-                debug!("IPMI: soft shutdown (short press)");
-                self.atx_power_short().await
-            }
-            _ => Err(crate::error::AppError::BadRequest(format!(
-                "Unknown chassis action: 0x{:02x}",
-                action
-            ))),
         }
     }
 
-    async fn get_power_status(&self) -> bool {
+    async fn get_power_state(&self) -> IpmiPowerState {
         let atx_guard = self.atx.read().await;
         match atx_guard.as_ref() {
-            Some(atx) => matches!(atx.power_status().await, PowerStatus::On),
-            None => false,
+            Some(atx) => IpmiPowerState::from(atx.power_status().await),
+            None => IpmiPowerState::Unknown,
         }
     }
 
@@ -539,9 +621,9 @@ impl IpmiService {
         RmcpHeader::new_ipmi(rmcp.sequence).write(&mut out);
         let resp_hdr = RmcppSessionHeader {
             auth_type: AUTH_TYPE_RMCP_PLUS,
-            session_seq: 0,
-            session_id: req_hdr.session_id,
             payload_type: PAYLOAD_TYPE_IPMI,
+            session_id: req_hdr.session_id,
+            session_seq: 0,
             payload_length: msg_bytes.len() as u16,
         };
         resp_hdr.write(&mut out);
@@ -576,13 +658,13 @@ impl IpmiService {
 
         let mut integrity_input = Vec::with_capacity(256);
         integrity_input.push(AUTH_TYPE_RMCP_PLUS);
-        integrity_input.extend_from_slice(&seq.to_le_bytes());
-        integrity_input.extend_from_slice(&console_session_id.to_le_bytes());
         integrity_input.push(ptype);
+        integrity_input.extend_from_slice(&console_session_id.to_le_bytes());
+        integrity_input.extend_from_slice(&seq.to_le_bytes());
         integrity_input.extend_from_slice(&(payload_data.len() as u16).to_le_bytes());
         integrity_input.extend_from_slice(&payload_data);
 
-        let pad_needed = (4 - (integrity_input.len() % 4)) % 4;
+        let pad_needed = (4 - ((integrity_input.len() + 2) % 4)) % 4;
         integrity_input.extend(std::iter::repeat(0xFFu8).take(pad_needed));
         integrity_input.push(pad_needed as u8);
         integrity_input.push(0x07);
@@ -593,9 +675,9 @@ impl IpmiService {
         RmcpHeader::new_ipmi(rmcp.sequence).write(&mut out);
         let resp_hdr = RmcppSessionHeader {
             auth_type: AUTH_TYPE_RMCP_PLUS,
-            session_seq: seq,
-            session_id: console_session_id,
             payload_type: ptype,
+            session_id: console_session_id,
+            session_seq: seq,
             payload_length: payload_data.len() as u16,
         };
         resp_hdr.write(&mut out);
@@ -605,5 +687,58 @@ impl IpmiService {
         out.push(0x07);
         out.extend_from_slice(&icv);
         Some(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn power_commands_are_gated_by_current_power_state() {
+        assert_eq!(
+            plan_chassis_control(0x01, IpmiPowerState::Off),
+            Ok(PlannedPowerAction::PowerShort)
+        );
+        assert_eq!(
+            plan_chassis_control(0x01, IpmiPowerState::On),
+            Ok(PlannedPowerAction::NoOp)
+        );
+        assert_eq!(
+            plan_chassis_control(0x00, IpmiPowerState::On),
+            Ok(PlannedPowerAction::PowerLong)
+        );
+        assert_eq!(
+            plan_chassis_control(0x00, IpmiPowerState::Off),
+            Ok(PlannedPowerAction::NoOp)
+        );
+        assert_eq!(
+            plan_chassis_control(0x03, IpmiPowerState::On),
+            Ok(PlannedPowerAction::Reset)
+        );
+        assert_eq!(
+            plan_chassis_control(0x03, IpmiPowerState::Off),
+            Ok(PlannedPowerAction::NoOp)
+        );
+    }
+
+    #[test]
+    fn unsupported_or_unsafe_power_commands_fail_closed() {
+        assert_eq!(plan_chassis_control(0x02, IpmiPowerState::On), Err(0xCC));
+        assert_eq!(plan_chassis_control(0x05, IpmiPowerState::On), Err(0xCC));
+        assert_eq!(plan_chassis_control(0x01, IpmiPowerState::Unknown), Err(0xD5));
+    }
+
+    #[test]
+    fn chassis_status_payload_requires_known_power_state() {
+        assert_eq!(
+            build_chassis_status_payload(IpmiPowerState::On),
+            Ok([0x01, 0x00, 0x00, 0x00])
+        );
+        assert_eq!(
+            build_chassis_status_payload(IpmiPowerState::Off),
+            Ok([0x00, 0x00, 0x00, 0x00])
+        );
+        assert_eq!(build_chassis_status_payload(IpmiPowerState::Unknown), Err(0xD5));
     }
 }
