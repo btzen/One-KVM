@@ -1,7 +1,6 @@
 //! RMCP+ (IPMI 2.0) session establishment: Open Session and RAKP handling.
 
 use super::crypto;
-use super::protocol::*;
 use super::session::SessionManager;
 
 pub struct OpenSessionRequest {

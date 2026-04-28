@@ -9,6 +9,7 @@ use super::protocol::{AUTH_TYPE_RMCP_PLUS, PRIV_ADMINISTRATOR};
 const SESSION_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_SESSIONS: usize = 8;
 
+#[allow(dead_code)]
 pub struct IpmiSession {
     pub session_id: u32,
     pub auth_type: u8,

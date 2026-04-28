@@ -5,6 +5,7 @@
 //! - IPMI message framing and checksums
 //! - HMAC-SHA1-96 integrity, AES-CBC-128 encryption
 
+#[allow(dead_code)]
 pub const RMCP_PORT: u16 = 623;
 pub const RMCP_VERSION_1: u8 = 0x06;
 
@@ -16,8 +17,10 @@ pub const ASF_TYPE_PING: u8 = 0x80;
 pub const ASF_TYPE_PONG: u8 = 0x40;
 
 pub const NETFN_CHASSIS_REQ: u8 = 0x00;
+#[allow(dead_code)]
 pub const NETFN_CHASSIS_RSP: u8 = 0x01;
 pub const NETFN_APP_REQ: u8 = 0x06;
+#[allow(dead_code)]
 pub const NETFN_APP_RSP: u8 = 0x07;
 
 pub const CMD_GET_DEVICE_ID: u8 = 0x01;
@@ -46,6 +49,7 @@ pub const CHANNEL_CURRENT: u8 = 0x0E;
 
 pub const CC_OK: u8 = 0x00;
 pub const CC_INVALID_COMMAND: u8 = 0xC1;
+#[allow(dead_code)]
 pub const CC_INVALID_DATA: u8 = 0xCC;
 
 pub const BMC_SLAVE_ADDR: u8 = 0x20;

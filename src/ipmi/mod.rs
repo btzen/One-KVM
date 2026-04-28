@@ -28,7 +28,7 @@ use crate::atx::{AtxController, PowerStatus};
 use protocol::*;
 use session::SessionManager;
 
-pub use crate::config::schema::IpmiConfig;
+pub use crate::config::IpmiConfig;
 
 const MAX_PACKET_SIZE: usize = 4096;
 

@@ -18,7 +18,7 @@ const HMAC_SHA1_96_LEN: usize = 12;
 const AES_BLOCK: usize = 16;
 
 pub fn hmac_sha1(key: &[u8], data: &[u8]) -> [u8; SHA1_LEN] {
-    let mut mac = HmacSha1::new_from_slice(key).expect("HMAC key");
+    let mut mac = <HmacSha1 as Mac>::new_from_slice(key).expect("HMAC key");
     mac.update(data);
     let result = mac.finalize();
     let mut out = [0u8; SHA1_LEN];
@@ -89,6 +89,9 @@ pub fn ipmi2_encrypt(key: &[u8], msg_bytes: &[u8]) -> (Vec<u8>, Vec<u8>) {
 }
 
 pub fn ipmi2_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Option<Vec<u8>> {
+    if ciphertext.len() % AES_BLOCK != 0 {
+        return None;
+    }
     let plaintext = aes_cbc_decrypt(key, iv, ciphertext);
     if plaintext.len() < 2 {
         return None;
