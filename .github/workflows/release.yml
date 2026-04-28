@@ -41,7 +41,15 @@ jobs:
           npm run build
 
       - name: Install cross
-        run: cargo install cross --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross@0.2.5
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          cache-on-failure: true
 
       - name: Build
         run: cross build --release --target ${{ matrix.target }}
