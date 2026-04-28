@@ -23,6 +23,7 @@ pub const NETFN_APP_REQ: u8 = 0x06;
 #[allow(dead_code)]
 pub const NETFN_APP_RSP: u8 = 0x07;
 
+pub const CMD_GET_CHANNEL_AUTH_CAPS: u8 = 0x38;
 pub const CMD_GET_DEVICE_ID: u8 = 0x01;
 pub const CMD_GET_CHANNEL_CIPHER_SUITES: u8 = 0x54;
 pub const CMD_SET_SESSION_PRIVILEGE: u8 = 0x3B;

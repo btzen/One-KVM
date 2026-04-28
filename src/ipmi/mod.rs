@@ -116,11 +116,75 @@ impl IpmiService {
             return self.handle_rmcpp(rmcp, payload).await;
         }
 
+        if auth_type == 0x00 {
+            return self.handle_pre_session(rmcp, payload);
+        }
+
         debug!(
             "IPMI: ignoring non-RMCP+ packet auth_type=0x{:02x}",
             auth_type
         );
         None
+    }
+
+    fn handle_pre_session(&self, rmcp: &RmcpHeader, payload: &[u8]) -> Option<Vec<u8>> {
+        let msg_len = *payload.get(9)? as usize;
+        let msg_data = payload.get(10..10 + msg_len)?;
+        let msg = IpmiMessage::read(msg_data)?;
+
+        match msg.command {
+            CMD_GET_CHANNEL_AUTH_CAPS => {
+                self.handle_get_channel_auth(rmcp, &msg, payload)
+            }
+            CMD_GET_CHANNEL_CIPHER_SUITES => {
+                let resp_msg = msg.build_response(CC_OK, vec![
+                    CHANNEL_CURRENT,
+                    0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+                ]);
+                self.wrap_v15_response(rmcp, &resp_msg, payload)
+            }
+            CMD_GET_DEVICE_ID => {
+                let resp_msg = msg.build_response(CC_OK, self.device_id_data());
+                self.wrap_v15_response(rmcp, &resp_msg, payload)
+            }
+            _ => {
+                debug!("IPMI: unhandled pre-session cmd=0x{:02x}", msg.command);
+                None
+            }
+        }
+    }
+
+    fn handle_get_channel_auth(
+        &self,
+        rmcp: &RmcpHeader,
+        msg: &IpmiMessage,
+        req_payload: &[u8],
+    ) -> Option<Vec<u8>> {
+        let resp_msg = msg.build_response(CC_OK, vec![
+            CHANNEL_CURRENT,
+            0x20,
+            0x00,
+            0x00,
+            0x00,
+        ]);
+        self.wrap_v15_response(rmcp, &resp_msg, req_payload)
+    }
+
+    fn wrap_v15_response(
+        &self,
+        rmcp: &RmcpHeader,
+        resp_msg: &IpmiMessage,
+        req_payload: &[u8],
+    ) -> Option<Vec<u8>> {
+        let msg_bytes = resp_msg.to_bytes();
+        let mut out = Vec::with_capacity(256);
+        RmcpHeader::new_ipmi(rmcp.sequence).write(&mut out);
+        out.push(0x00);
+        out.extend_from_slice(&req_payload[1..5]);
+        out.extend_from_slice(&req_payload[5..9]);
+        out.push(msg_bytes.len() as u8);
+        out.extend_from_slice(&msg_bytes);
+        Some(out)
     }
 
     // ════════════════════════════════════════
