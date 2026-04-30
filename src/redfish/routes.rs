@@ -247,20 +247,19 @@ async fn system_detail(
             .into_response();
     }
 
-    let (power_state, atx_state) = {
+    let power_state = {
         let atx_guard = state.atx.read().await;
         match atx_guard.as_ref() {
             Some(atx) => {
                 let ps = atx.power_status().await;
-                let ps_str = match ps {
+                match ps {
                     crate::atx::PowerStatus::On => "On",
                     crate::atx::PowerStatus::Off => "Off",
                     crate::atx::PowerStatus::Unknown => "On",
-                };
-                let state = atx.state().await;
-                (ps_str.to_string(), state)
+                }
+                .to_string()
             }
-            None => ("On".to_string(), crate::atx::AtxState::default()),
+            None => "On".to_string(),
         }
     };
 
@@ -517,8 +516,6 @@ async fn manager_detail(
         .unwrap_or_default();
     let local_offset = now.offset();
     let offset_str = format!("{:+03}{:02}", local_offset.whole_hours(), local_offset.minutes_past_hour().abs());
-
-    let msd_available = state.msd.read().await.is_some();
 
     let manager = Manager {
         odata_type: "#Manager.v1_15_0.Manager".to_string(),
@@ -960,7 +957,7 @@ async fn event_service() -> Json<EventService> {
 
 async fn event_service_sse(
     State(state): State<Arc<AppState>>,
-) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>> {
+) -> Response {
     let mut device_info_rx = state.subscribe_device_info();
 
     let stream = async_stream::stream! {
@@ -984,7 +981,7 @@ async fn event_service_sse(
                     });
 
                     let event = Event::default().data(serde_json::to_string(&payload).unwrap_or_default());
-                    yield Ok(event);
+                    yield Ok::<_, Infallible>(event);
                 }
                 Err(_) => break,
             }
@@ -995,7 +992,7 @@ async fn event_service_sse(
         KeepAlive::new()
             .interval(Duration::from_secs(30))
             .text(":\n"),
-    )
+    ).into_response()
 }
 
 async fn system_patch(

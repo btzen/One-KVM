@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-fn odata_ref(id: &str) -> ODataLink {
+pub fn odata_ref(id: &str) -> ODataLink {
     ODataLink {
         odata_id: id.to_string(),
     }
