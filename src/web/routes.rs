@@ -19,6 +19,15 @@ use crate::state::AppState;
 
 /// Create the main application router
 pub fn create_router(state: Arc<AppState>) -> Router {
+    // Redfish API routes (separate module, self-contained auth)
+    let redfish_router = {
+        let config = state.config.get();
+        if config.redfish.enabled {
+            Some(crate::redfish::routes::create_redfish_router(state.clone()))
+        } else {
+            None
+        }
+    };
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -247,10 +256,16 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     let static_routes = super::static_files::static_file_router();
 
     // Main router
-    Router::new()
+    let mut main_router = Router::new()
         .nest("/api", api_routes)
         .merge(static_routes)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
-        .with_state(state)
+        .with_state(state);
+
+    if let Some(rf) = redfish_router {
+        main_router = main_router.merge(rf);
+    }
+
+    main_router
 }
