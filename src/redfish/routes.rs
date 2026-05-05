@@ -6,12 +6,11 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
     },
-    routing::{delete, get, patch, post},
+    routing::{delete, get, post},
     Json, Router,
 };
-use futures::stream::Stream;
 use serde_json::json;
-use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{info, warn};
 
@@ -574,7 +573,6 @@ async fn manager_detail(
 }
 
 async fn virtual_media_collection(
-    State(state): State<Arc<AppState>>,
     Path(manager_id): Path<String>,
 ) -> Response {
     if manager_id != MANAGER_ID {
