@@ -60,12 +60,12 @@ pub async fn redfish_auth_middleware(
 fn is_redfish_public_endpoint(path: &str) -> bool {
     matches!(
         path,
-        "/redfish"
-            | "/redfish/v1"
-            | "/redfish/v1/"
-            | "/redfish/v1/odata"
-            | "/redfish/v1/SessionService/Sessions"
-    ) || path.starts_with("/redfish/v1/$metadata")
+        "/"
+            | "/v1"
+            | "/v1/"
+            | "/v1/odata"
+            | "/v1/SessionService/Sessions"
+    ) || path.starts_with("/v1/$metadata")
 }
 
 fn decode_basic_auth(encoded: &str) -> Option<(String, String)> {
