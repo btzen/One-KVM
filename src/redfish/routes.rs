@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderName, HeaderValue, StatusCode},
     middleware,
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -12,6 +12,7 @@ use axum::{
 use futures::stream::Stream;
 use serde_json::json;
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{info, warn};
 
 use super::auth::redfish_auth_middleware;
@@ -97,6 +98,10 @@ pub fn create_redfish_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/redfish", get(service_root_redirect))
         .nest("/redfish/", redfish_routes)
+        .layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("odata-version"),
+            HeaderValue::from_static("4.0"),
+        ))
         .with_state(state)
 }
 
@@ -140,7 +145,8 @@ fn service_root_static(uuid: &str) -> ServiceRoot {
 
 async fn service_root(State(state): State<Arc<AppState>>) -> Json<ServiceRoot> {
     let config = state.config.get();
-    let uuid = format!("one-kvm-{}", config.video.device.as_deref().unwrap_or("default"));
+    let device = config.video.device.as_deref().unwrap_or("default");
+    let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, device.as_bytes()).to_string();
     Json(service_root_static(&uuid))
 }
 
@@ -531,7 +537,7 @@ async fn manager_detail(
         Model: "One-KVM".to_string(),
         DateTime: datetime,
         DateTimeLocalOffset: offset_str,
-        ServiceEntryPointUUID: format!("one-kvm-mgr-{}", manager_id),
+        ServiceEntryPointUUID: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, format!("one-kvm-mgr-{}", manager_id).as_bytes()).to_string(),
         CommandShell: CommandShell {
             ServiceEnabled: state.extensions.check_available(crate::extensions::ExtensionId::Ttyd),
             MaxConcurrentSessions: 1,
