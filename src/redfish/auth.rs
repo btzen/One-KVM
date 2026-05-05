@@ -60,7 +60,11 @@ pub async fn redfish_auth_middleware(
 fn is_redfish_public_endpoint(path: &str) -> bool {
     matches!(
         path,
-        "/redfish" | "/redfish/v1" | "/redfish/v1/" | "/redfish/v1/odata"
+        "/redfish"
+            | "/redfish/v1"
+            | "/redfish/v1/"
+            | "/redfish/v1/odata"
+            | "/redfish/v1/SessionService/Sessions"
     ) || path.starts_with("/redfish/v1/$metadata")
 }
 

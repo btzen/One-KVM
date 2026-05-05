@@ -96,7 +96,7 @@ pub fn create_redfish_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/redfish", get(service_root_redirect))
-        .nest("/redfish", redfish_routes)
+        .nest("/redfish/", redfish_routes)
         .with_state(state)
 }
 
@@ -996,6 +996,7 @@ async fn event_service_sse(
 }
 
 async fn system_patch(
+    State(state): State<Arc<AppState>>,
     Path(system_id): Path<String>,
     Json(req): Json<ComputerSystemPatchRequest>,
 ) -> Response {
@@ -1016,6 +1017,22 @@ async fn system_patch(
         }
     }
 
+    let power_state = {
+        let atx_guard = state.atx.read().await;
+        match atx_guard.as_ref() {
+            Some(atx) => {
+                let ps = atx.power_status().await;
+                match ps {
+                    crate::atx::PowerStatus::On => "On",
+                    crate::atx::PowerStatus::Off => "Off",
+                    crate::atx::PowerStatus::Unknown => "On",
+                }
+                .to_string()
+            }
+            None => "On".to_string(),
+        }
+    };
+
     let system = ComputerSystem {
         odata_type: "#ComputerSystem.v1_20_0.ComputerSystem".to_string(),
         odata_id: format!("/redfish/v1/Systems/{}", system_id),
@@ -1030,7 +1047,7 @@ async fn system_patch(
         Model: "Unknown".to_string(),
         SerialNumber: String::new(),
         PartNumber: String::new(),
-        PowerState: "On".to_string(),
+        PowerState: power_state,
         BiosVersion: "Unknown".to_string(),
         Status: Status::enabled_ok(),
         Boot: Boot {
