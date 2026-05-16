@@ -58,6 +58,7 @@ impl DatabasePool {
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'Viewer',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
@@ -65,6 +66,25 @@ impl DatabasePool {
         )
         .execute(&self.pool)
         .await?;
+
+        self.migrate_users_add_role().await?;
+        Ok(())
+    }
+
+    async fn migrate_users_add_role(&self) -> Result<()> {
+        let has_role: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('users') WHERE name = 'role'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(false);
+
+        if !has_role {
+            sqlx::query("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'Administrator'")
+                .execute(&self.pool)
+                .await?;
+            tracing::info!("Migrated users table: added 'role' column (existing user -> Administrator)");
+        }
         Ok(())
     }
 

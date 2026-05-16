@@ -10,6 +10,7 @@ use tracing::{info, warn};
 
 use super::super::schema::*;
 use super::{empty_collection, resource_not_found, service_unavailable, validate_id};
+use crate::auth::{Session, Privilege};
 use crate::error::AppError;
 use crate::msd::{ImageInfo, ImageManager, MountedMedia, MountedMediaKind};
 use crate::state::AppState;
@@ -154,9 +155,15 @@ fn virtual_media_resource(
 
 async fn virtual_media_insert(
     State(state): State<Arc<AppState>>,
+    axum::Extension(session): axum::Extension<Session>,
     Path((manager_id, media_id)): Path<(String, String)>,
     Json(req): Json<InsertMediaRequest>,
 ) -> Response {
+    if !session.has_privilege(Privilege::Configure) {
+        return (StatusCode::FORBIDDEN, axum::Json(RedfishError::general_error(
+            "Insufficient privilege: Configure required",
+        ))).into_response();
+    }
     if let Some(resp) = validate_id(&manager_id) {
         return resp;
     }
@@ -213,8 +220,14 @@ async fn virtual_media_insert(
 
 async fn virtual_media_eject(
     State(state): State<Arc<AppState>>,
+    axum::Extension(session): axum::Extension<Session>,
     Path((manager_id, media_id)): Path<(String, String)>,
 ) -> Response {
+    if !session.has_privilege(Privilege::Configure) {
+        return (StatusCode::FORBIDDEN, axum::Json(RedfishError::general_error(
+            "Insufficient privilege: Configure required",
+        ))).into_response();
+    }
     if let Some(resp) = validate_id(&manager_id) {
         return resp;
     }

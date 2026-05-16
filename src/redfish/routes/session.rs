@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use super::super::schema::*;
 use super::empty_collection;
+use crate::auth::{Session as AuthSession, Privilege};
 use crate::state::AppState;
 
 pub(crate) fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
@@ -41,7 +42,13 @@ async fn session_service() -> Json<SessionService> {
     })
 }
 
-async fn session_list(State(state): State<Arc<AppState>>) -> Response {
+async fn session_list(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(session): axum::Extension<AuthSession>,
+) -> Response {
+    if !session.has_privilege(Privilege::Configure) {
+        return (StatusCode::FORBIDDEN, Json(RedfishError::general_error("Insufficient privilege"))).into_response();
+    }
     let session_ids = match state.sessions.list_ids().await {
         Ok(ids) => ids,
         Err(e) => {
@@ -90,12 +97,15 @@ async fn session_create(
     };
 
     if !state.config.get().auth.single_user_allow_multiple_sessions {
-        let revoked_ids = state.sessions.list_ids().await.unwrap_or_default();
-        let _ = state.sessions.delete_all().await;
+        let revoked_ids = state
+            .sessions
+            .delete_by_user(&user.id)
+            .await
+            .unwrap_or_default();
         state.remember_revoked_sessions(revoked_ids).await;
     }
 
-    let session = match state.sessions.create(&user.id).await {
+    let session = match state.sessions.create(&user.id, user.role).await {
         Ok(s) => s,
         Err(e) => {
             return (
@@ -105,6 +115,8 @@ async fn session_create(
                 .into_response()
         }
     };
+
+    let role_id = user.role.as_str().to_string();
 
     info!("Redfish: Session created for user '{}'", user.username);
 
@@ -124,6 +136,7 @@ async fn session_create(
             name: format!("Session for {}", user.username),
             description: "Manager User Session".to_string(),
             user_name: user.username,
+            role_id,
         }),
     )
         .into_response()
@@ -131,33 +144,49 @@ async fn session_create(
 
 async fn session_delete(
     State(state): State<Arc<AppState>>,
+    axum::Extension(caller_session): axum::Extension<AuthSession>,
     Path(session_id): Path<String>,
 ) -> Response {
-    match state.sessions.get(&session_id).await {
-        Ok(Some(_)) => {
-            if let Err(e) = state.sessions.delete(&session_id).await {
-                tracing::warn!("Redfish: Session delete failed: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(RedfishError::general_error(&e.to_string())),
-                )
-                    .into_response();
-            }
-            info!("Redfish: Session {} deleted", session_id);
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(RedfishError::resource_not_found()),
-        )
-            .into_response(),
-        Err(e) => {
-            tracing::warn!("Redfish: Session delete failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(RedfishError::general_error(&e.to_string())),
+    let target_session = match state.sessions.get(&session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(RedfishError::resource_not_found()),
             )
                 .into_response()
         }
+        Err(e) => {
+            tracing::warn!("Redfish: Session lookup failed: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(RedfishError::general_error(&e.to_string())),
+            )
+                .into_response();
+        }
+    };
+
+    let is_own = target_session.user_id == caller_session.user_id;
+    let is_admin = caller_session.has_privilege(Privilege::Configure);
+
+    if !is_own && !is_admin {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(RedfishError::general_error(
+                "Can only delete your own sessions",
+            )),
+        )
+            .into_response();
     }
+
+    if let Err(e) = state.sessions.delete(&session_id).await {
+        tracing::warn!("Redfish: Session delete failed: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(RedfishError::general_error(&e.to_string())),
+        )
+            .into_response();
+    }
+    info!("Redfish: Session {} deleted", session_id);
+    StatusCode::NO_CONTENT.into_response()
 }

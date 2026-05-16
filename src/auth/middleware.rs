@@ -8,6 +8,8 @@ use axum::{
 use axum_extra::extract::CookieJar;
 use std::sync::Arc;
 
+use crate::auth::session::Session;
+use crate::auth::user::Privilege;
 use crate::state::AppState;
 use crate::web::ErrorResponse;
 
@@ -94,4 +96,39 @@ fn is_setup_public_endpoint(path: &str) -> bool {
         path,
         "/setup" | "/setup/init" | "/devices" | "/stream/codecs"
     )
+}
+
+pub async fn console_middleware(
+    State(_state): State<Arc<AppState>>,
+    axum::Extension(session): axum::Extension<Session>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    require_privilege(session, Privilege::Operate, request, next).await
+}
+
+pub async fn manager_middleware(
+    State(_state): State<Arc<AppState>>,
+    axum::Extension(session): axum::Extension<Session>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    require_privilege(session, Privilege::Configure, request, next).await
+}
+
+async fn require_privilege(
+    session: Session,
+    privilege: Privilege,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if session.has_privilege(privilege) {
+        return Ok(next.run(request).await);
+    }
+
+    let body = ErrorResponse {
+        success: false,
+        message: format!("Insufficient privilege: {:?} required", privilege),
+    };
+    Ok((StatusCode::FORBIDDEN, Json(body)).into_response())
 }

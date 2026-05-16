@@ -26,6 +26,9 @@ import { configApi } from '@/api'
 import { useConfigStore } from '@/stores/config'
 import { HidBackend } from '@/types/generated'
 import type { HidConfigUpdate } from '@/types/generated'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
 
 const props = defineProps<{
   open: boolean
@@ -239,6 +242,7 @@ watch(() => props.open, (isOpen) => {
       </Button>
     </PopoverTrigger>
     <PopoverContent class="w-[min(320px,92vw)] p-3" align="start">
+      <template v-if="authStore.canConfigure">
       <div class="space-y-3">
         <h4 class="text-sm font-medium">{{ t('actionbar.hidConfig') }}</h4>
 
@@ -392,6 +396,7 @@ watch(() => props.open, (isOpen) => {
           </Button>
           </div>
       </div>
+      </template>
     </PopoverContent>
   </Popover>
 </template>

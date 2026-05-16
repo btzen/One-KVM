@@ -426,6 +426,7 @@ pub struct Session {
     pub name: String,
     pub description: String,
     pub user_name: String,
+    pub role_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

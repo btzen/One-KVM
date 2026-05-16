@@ -2,8 +2,14 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi, systemApi, type AuthLoginResponse } from '@/api'
 
+export type Privilege =
+  | 'Operate'
+  | 'Configure'
+
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<string | null>(null)
+  const role = ref<string | null>(null)
+  const privileges = ref<Privilege[]>([])
   const isAuthenticated = ref(false)
   const initialized = ref(false)
   const needsSetup = ref(false)
@@ -12,6 +18,13 @@ export const useAuthStore = defineStore('auth', () => {
   let pendingUsername: string | null = null
 
   const isLoggedIn = computed(() => isAuthenticated.value && user.value !== null)
+
+  function hasPrivilege(p: Privilege): boolean {
+    return privileges.value.includes(p)
+  }
+
+  const canOperate = computed(() => hasPrivilege('Operate'))
+  const canConfigure = computed(() => hasPrivilege('Configure'))
 
   async function checkSetupStatus() {
     try {
@@ -30,10 +43,14 @@ export const useAuthStore = defineStore('auth', () => {
       const result = await authApi.check()
       isAuthenticated.value = result.authenticated
       user.value = result.user || null
+      role.value = result.role || null
+      privileges.value = (result.privileges as Privilege[]) || []
       return result
     } catch (e) {
       isAuthenticated.value = false
       user.value = null
+      role.value = null
+      privileges.value = []
       error.value = e instanceof Error ? e.message : 'Not authenticated'
       if (e instanceof Error) {
         throw e
@@ -104,6 +121,8 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       isAuthenticated.value = false
       user.value = null
+      role.value = null
+      privileges.value = []
     }
   }
 
@@ -150,12 +169,17 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user,
+    role,
+    privileges,
     isAuthenticated,
     initialized,
     needsSetup,
     loading,
     error,
     isLoggedIn,
+    hasPrivilege,
+    canOperate,
+    canConfigure,
     checkSetupStatus,
     checkAuth,
     beginLogin,

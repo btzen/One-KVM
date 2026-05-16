@@ -2160,6 +2160,8 @@ function handleKeyDown(e: KeyboardEvent) {
     e.stopPropagation()
   }
 
+  if (!authStore.canOperate) return
+
   if (!isFullscreen.value && (e.metaKey || e.key === 'Meta')) {
   }
 
@@ -2188,6 +2190,8 @@ function handleKeyUp(e: KeyboardEvent) {
     e.preventDefault()
     e.stopPropagation()
   }
+
+  if (!authStore.canOperate) return
 
   const canonicalKey = keyboardEventToCanonicalKey(e.code, e.key)
   if (canonicalKey === undefined) {
@@ -2576,6 +2580,8 @@ function handleTouchPointerCancel(e: PointerEvent) {
 function handleMouseMove(e: MouseEvent) {
   updateLocalCrosshairFromEvent(e)
 
+  if (!authStore.canOperate) return
+
   const videoElement = getActiveVideoElement()
   if (!videoElement) return
 
@@ -2700,6 +2706,8 @@ const pressedMouseButton = ref<'left' | 'right' | 'middle' | null>(null)
 function handleMouseDown(e: MouseEvent) {
   e.preventDefault()
 
+  if (!authStore.canOperate) return
+
   const container = videoContainerRef.value
   if (container && document.activeElement !== container) {
     if (typeof container.focus === 'function') {
@@ -2728,6 +2736,7 @@ function handleMouseDown(e: MouseEvent) {
 
 function handleMouseUp(e: MouseEvent) {
   e.preventDefault()
+  if (!authStore.canOperate) return
   handleMouseUpInternal(e.button)
 }
 
@@ -2755,6 +2764,7 @@ function handleMouseUpInternal(rawButton: number) {
 
 function handleWheel(e: WheelEvent) {
   e.preventDefault()
+  if (!authStore.canOperate) return
   const scroll = e.deltaY > 0 ? -1 : 1
   sendMouseEvent({ type: 'scroll', scroll })
 }
@@ -2900,7 +2910,7 @@ async function activateConsoleView() {
   void systemStore.fetchAllStates()
   void configStore.refreshHid().then(() => syncMouseModeFromConfig()).catch(() => {})
 
-  if (!hidWs.connected.value) {
+  if (authStore.canOperate && !hidWs.connected.value) {
     hidWs.connect().catch(() => {})
   }
 
@@ -3075,6 +3085,7 @@ onUnmounted(() => {
               />
 
               <StatusCard
+                v-if="authStore.canOperate"
                 :title="t('statusCard.hid')"
                 type="hid"
                 :status="hidStatus"
@@ -3105,6 +3116,7 @@ onUnmounted(() => {
                 :details="audioDetails"
               />
               <StatusCard
+                v-if="authStore.canOperate"
                 :title="t('statusCard.hid')"
                 type="hid"
                 :status="hidStatus"
@@ -3199,7 +3211,7 @@ onUnmounted(() => {
           class="relative bg-black overflow-hidden flex items-center justify-center touch-none"
           :style="videoContainerStyle"
           :class="{
-            'cursor-none': true,
+            'cursor-none': authStore.canOperate,
           }"
           tabindex="0"
           @mouseleave="handleMouseLeaveVideo"
@@ -3237,7 +3249,7 @@ onUnmounted(() => {
             alt=""
           />
           <div
-            v-if="cursorVisible && localCrosshairPos"
+            v-if="authStore.canOperate && cursorVisible && localCrosshairPos"
             class="pointer-events-none absolute z-[15] -translate-x-1/2 -translate-y-1/2"
             :style="{
               left: `${localCrosshairPos.x}px`,

@@ -9,8 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Power, RotateCcw, CircleDot, Wifi, Send, HardDrive } from 'lucide-vue-next'
 import { atxApi } from '@/api'
 import { atxConfigApi } from '@/api/config'
+import { useAuthStore } from '@/stores/auth'
 
 type AtxAction = 'short' | 'long' | 'reset'
+
+const authStore = useAuthStore()
 
 const minActionFeedbackMs = 800
 const actionDurations: Record<AtxAction, number> = {
@@ -198,6 +201,7 @@ watch(
 
 <template>
   <div class="p-2.5 space-y-2.5">
+    <template v-if="authStore.canOperate">
     <Tabs v-model="activeTab">
       <TabsList class="grid h-auto w-full grid-cols-2 gap-1 rounded-md border border-border bg-muted p-0.5">
         <TabsTrigger
@@ -333,5 +337,6 @@ watch(
         </div>
       </TabsContent>
     </Tabs>
+    </template>
   </div>
 </template>

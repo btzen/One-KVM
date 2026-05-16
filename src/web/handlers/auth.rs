@@ -78,9 +78,14 @@ async fn create_authenticated_session(
     user_id: &str,
 ) -> Result<(CookieJar, Json<AuthLoginResponse>)> {
     let config = state.config.get();
+    let user = state
+        .users
+        .get_by_id(user_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
     let (session, revoked_ids) = state
         .sessions
-        .create_for_login(user_id, config.auth.single_user_allow_multiple_sessions)
+        .create_for_login(user_id, user.role, config.auth.single_user_allow_multiple_sessions)
         .await?;
     state.remember_revoked_sessions(revoked_ids).await;
 
@@ -132,20 +137,28 @@ pub async fn logout(
 pub struct AuthCheckResponse {
     pub authenticated: bool,
     pub user: Option<String>,
+    pub role: Option<String>,
+    pub privileges: Vec<String>,
 }
 
 pub async fn auth_check(
     State(state): State<Arc<AppState>>,
     axum::Extension(session): axum::Extension<Session>,
 ) -> Json<AuthCheckResponse> {
-    // Get user info from user_id
-    let username = match state.users.single_user().await {
-        Ok(Some(user)) if user.id == session.user_id => Some(user.username),
+    let username = match state.users.get_by_id(&session.user_id).await {
+        Ok(Some(user)) => Some(user.username),
         _ => None,
     };
 
     Json(AuthCheckResponse {
         authenticated: true,
         user: username,
+        role: Some(session.role.to_string()),
+        privileges: session
+            .role
+            .privileges()
+            .iter()
+            .map(|p| format!("{:?}", p))
+            .collect(),
     })
 }

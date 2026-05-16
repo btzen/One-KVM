@@ -106,9 +106,8 @@ pub async fn disable_totp(
 async fn authenticated_user(state: &Arc<AppState>, session: &Session) -> Result<crate::auth::User> {
     state
         .users
-        .single_user()
+        .get_by_id(&session.user_id)
         .await?
-        .filter(|user| user.id == session.user_id)
         .ok_or_else(|| AppError::AuthError("Invalid session".to_string()))
 }
 
@@ -144,13 +143,9 @@ pub async fn change_password(
 ) -> Result<Json<LoginResponse>> {
     let current_user = state
         .users
-        .single_user()
+        .get_by_id(&session.user_id)
         .await?
         .ok_or_else(|| AppError::AuthError("User not found".to_string()))?;
-
-    if current_user.id != session.user_id {
-        return Err(AppError::AuthError("Invalid session".to_string()));
-    }
 
     if req.new_password.len() < 4 {
         return Err(AppError::BadRequest(
@@ -195,13 +190,9 @@ pub async fn change_username(
 ) -> Result<Json<LoginResponse>> {
     let current_user = state
         .users
-        .single_user()
+        .get_by_id(&session.user_id)
         .await?
         .ok_or_else(|| AppError::AuthError("User not found".to_string()))?;
-
-    if current_user.id != session.user_id {
-        return Err(AppError::AuthError("Invalid session".to_string()));
-    }
 
     if req.username.len() < 2 {
         return Err(AppError::BadRequest(

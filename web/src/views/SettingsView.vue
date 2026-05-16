@@ -24,6 +24,8 @@ import {
   usbApi,
   vncConfigApi,
   watchdogConfigApi,
+  usersApi,
+  type UserInfo,
   type EncoderBackendInfo,
   type AuthConfig,
   type RustDeskConfigResponse,
@@ -97,6 +99,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -125,6 +128,8 @@ import {
   Server,
   Lock,
   User,
+  KeyRound,
+  Pencil,
   RefreshCw,
   Terminal,
   Play,
@@ -170,6 +175,7 @@ const SETTINGS_SECTION_IDS = [
   'ext-ttyd',
   'third-party-access',
   'ext-remote-access',
+  'users',
   'about',
 ] as const
 type SettingsSectionId = typeof SETTINGS_SECTION_IDS[number]
@@ -263,6 +269,9 @@ async function loadSectionData(section: SettingsSectionId) {
       return
     case 'account':
       await loadAuthConfig()
+      if (authStore.canConfigure) {
+        await loadUsers()
+      }
       return
     case 'network':
       await loadWebServerConfig()
@@ -309,6 +318,9 @@ async function loadSectionData(section: SettingsSectionId) {
         loadVncConfig(),
       ])
       return
+    case 'users':
+      await loadUsers()
+      return
     case 'about':
       await Promise.all([
         loadUpdateOverview(),
@@ -328,6 +340,118 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const passwordSaving = ref(false)
 const passwordSaved = ref(false)
+
+const userList = ref<UserInfo[]>([])
+const userListLoading = ref(false)
+const showCreateUserDialog = ref(false)
+const showEditUserDialog = ref(false)
+const showDeleteUserDialog = ref(false)
+const showUserPasswordDialog = ref(false)
+const newUserUsername = ref('')
+const newUserPassword = ref('')
+const newUserRole = ref('Operator')
+const newUserError = ref('')
+const editTargetUser = ref<UserInfo | null>(null)
+const editUsername = ref('')
+const editRole = ref('')
+const editUserError = ref('')
+const userPasswordTarget = ref<UserInfo | null>(null)
+const userPasswordValue = ref('')
+const userPasswordError = ref('')
+const deleteUserTarget = ref<UserInfo | null>(null)
+
+async function loadUsers() {
+  userListLoading.value = true
+  try {
+    userList.value = await usersApi.list()
+  } finally {
+    userListLoading.value = false
+  }
+}
+
+async function handleCreateUser() {
+  newUserError.value = ''
+  if (newUserUsername.value.length < 2) {
+    newUserError.value = t('auth.enterUsername')
+    return
+  }
+  if (newUserPassword.value.length < 4) {
+    newUserError.value = t('setup.passwordHint')
+    return
+  }
+  try {
+    await usersApi.create({ username: newUserUsername.value, password: newUserPassword.value, role: newUserRole.value })
+    showCreateUserDialog.value = false
+    newUserUsername.value = ''
+    newUserPassword.value = ''
+    newUserRole.value = 'Operator'
+    await loadUsers()
+  } catch {
+    newUserError.value = t('users.createFailed')
+  }
+}
+
+function openEditUserDialog(user: UserInfo) {
+  editTargetUser.value = user
+  editUsername.value = user.username
+  editRole.value = user.role
+  editUserError.value = ''
+  showEditUserDialog.value = true
+}
+
+async function handleEditUser() {
+  if (!editTargetUser.value) return
+  editUserError.value = ''
+  if (editUsername.value.length < 2) {
+    editUserError.value = t('auth.enterUsername')
+    return
+  }
+  try {
+    await usersApi.update(editTargetUser.value.id, { username: editUsername.value, role: editRole.value })
+    showEditUserDialog.value = false
+    await loadUsers()
+  } catch {
+    editUserError.value = t('users.updateFailed')
+  }
+}
+
+function openUserPasswordDialog(user: UserInfo) {
+  userPasswordTarget.value = user
+  userPasswordValue.value = ''
+  userPasswordError.value = ''
+  showUserPasswordDialog.value = true
+}
+
+async function handleSetUserPassword() {
+  if (!userPasswordTarget.value) return
+  userPasswordError.value = ''
+  if (userPasswordValue.value.length < 4) {
+    userPasswordError.value = t('setup.passwordHint')
+    return
+  }
+  try {
+    await usersApi.update(userPasswordTarget.value.id, { password: userPasswordValue.value })
+    showUserPasswordDialog.value = false
+  } catch {
+    userPasswordError.value = t('users.passwordFailed')
+  }
+}
+
+function openDeleteUserDialog(user: UserInfo) {
+  deleteUserTarget.value = user
+  showDeleteUserDialog.value = true
+}
+
+async function handleDeleteUser() {
+  if (!deleteUserTarget.value) return
+  try {
+    await usersApi.delete(deleteUserTarget.value.id)
+    showDeleteUserDialog.value = false
+    await loadUsers()
+  } catch {
+    // dialog stays open for retry
+  }
+}
 const passwordError = ref('')
 const showPasswords = ref(false)
 const authConfig = ref<AuthConfig>({
@@ -2880,6 +3004,72 @@ watch(isWindows, () => {
             <TotpSettingsCard />
 
             <Card>
+              <CardHeader class="flex flex-row items-start justify-between space-y-0">
+                <div class="space-y-1.5">
+                  <CardTitle>{{ t('users.title') }}</CardTitle>
+                  <CardDescription>{{ t('users.description') }}</CardDescription>
+                </div>
+                <Button size="sm" @click="showCreateUserDialog = true">
+                  <Plus class="h-4 w-4 mr-1" />
+                  {{ t('users.addUser') }}
+                </Button>
+              </CardHeader>
+              <CardContent class="space-y-3">
+                <template v-if="userList.length > 0">
+                  <div class="rounded-md border overflow-x-auto">
+                    <table class="w-full text-sm">
+                      <thead>
+                        <tr class="border-b bg-muted/40">
+                          <th class="px-3 py-2 text-left font-medium">{{ t('users.username') }}</th>
+                          <th class="px-3 py-2 text-left font-medium">{{ t('users.role') }}</th>
+                          <th class="px-3 py-2 text-right font-medium">{{ t('users.colAction') }}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="u in userList"
+                          :key="u.id"
+                          class="border-b last:border-b-0 hover:bg-muted/20"
+                        >
+                          <td class="px-3 py-2">
+                            <div class="flex items-center gap-2">
+                              <span class="font-medium truncate">{{ u.username }}</span>
+                              <span v-if="u.username === authStore.user" class="text-[10px] text-muted-foreground">({{ t('users.currentUser') }})</span>
+                            </div>
+                          </td>
+                          <td class="px-3 py-2">
+                            <Badge :variant="u.role === 'Administrator' ? 'default' : 'secondary'" class="text-[10px] px-1.5 py-0 h-4">
+                              {{ u.role === 'Administrator' ? t('users.roleAdmin') : u.role === 'Operator' ? t('users.roleOperator') : t('users.roleViewer') }}
+                            </Badge>
+                          </td>
+                          <td class="px-3 py-2 text-right">
+                            <div class="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon" class="h-7 w-7" :disabled="u.username === authStore.user" @click="openEditUserDialog(u)">
+                                <Pencil class="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon" class="h-7 w-7" :disabled="u.username === authStore.user" @click="openUserPasswordDialog(u)">
+                                <KeyRound class="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-destructive" :disabled="u.username === authStore.user" @click="openDeleteUserDialog(u)">
+                                <Trash2 class="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+                <div v-else-if="userListLoading" class="py-6 text-center text-muted-foreground text-sm">
+                  {{ t('common.loading') }}
+                </div>
+                <div v-else class="py-6 text-center text-muted-foreground text-sm">
+                  {{ t('users.noUsers') }}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
               <CardHeader>
                 <CardTitle>{{ t('settings.authSettings') }}</CardTitle>
                 <CardDescription>{{ t('settings.authSettingsDesc') }}</CardDescription>
@@ -5332,5 +5522,103 @@ watch(isWindows, () => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- User Management Dialogs -->
+    <Dialog v-model:open="showCreateUserDialog">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ t('users.createUser') }}</DialogTitle>
+          <DialogDescription>{{ t('users.createUserDesc') }}</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <Label>{{ t('users.username') }}</Label>
+            <Input v-model="newUserUsername" :placeholder="t('users.usernamePlaceholder')" />
+          </div>
+          <div class="space-y-2">
+            <Label>{{ t('users.password') }}</Label>
+            <Input v-model="newUserPassword" type="password" :placeholder="t('users.passwordPlaceholder')" />
+          </div>
+          <div class="space-y-2">
+            <Label>{{ t('users.role') }}</Label>
+            <select v-model="newUserRole" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm">
+              <option value="Administrator">{{ t('users.roleAdmin') }}</option>
+              <option value="Operator">{{ t('users.roleOperator') }}</option>
+              <option value="Viewer">{{ t('users.roleViewer') }}</option>
+            </select>
+          </div>
+        </div>
+        <p v-if="newUserError" class="text-xs text-destructive">{{ newUserError }}</p>
+        <DialogFooter>
+          <Button variant="outline" @click="showCreateUserDialog = false">{{ t('common.cancel') }}</Button>
+          <Button :disabled="!newUserUsername || !newUserPassword" @click="handleCreateUser">{{ t('users.createUser') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showEditUserDialog">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ t('users.editUser') }}</DialogTitle>
+          <DialogDescription>{{ t('users.editUserDesc') }}</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <Label>{{ t('users.username') }}</Label>
+            <Input v-model="editUsername" />
+          </div>
+          <div class="space-y-2">
+            <Label>{{ t('users.role') }}</Label>
+            <select v-model="editRole" class="w-full h-9 px-3 rounded-md border border-input bg-background text-sm" :disabled="editTargetUser?.username === authStore.user">
+              <option value="Administrator">{{ t('users.roleAdmin') }}</option>
+              <option value="Operator">{{ t('users.roleOperator') }}</option>
+              <option value="Viewer">{{ t('users.roleViewer') }}</option>
+            </select>
+          </div>
+        </div>
+        <p v-if="editUserError" class="text-xs text-destructive">{{ editUserError }}</p>
+        <DialogFooter>
+          <Button variant="outline" @click="showEditUserDialog = false">{{ t('common.cancel') }}</Button>
+          <Button @click="handleEditUser">{{ t('users.save') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showUserPasswordDialog">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ t('users.setPassword') }}</DialogTitle>
+          <DialogDescription>{{ t('users.setPasswordDesc') }}</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <Label>{{ t('users.newPassword') }}</Label>
+            <Input v-model="userPasswordValue" type="password" :placeholder="t('users.passwordPlaceholder')" />
+          </div>
+        </div>
+        <p v-if="userPasswordError" class="text-xs text-destructive">{{ userPasswordError }}</p>
+        <DialogFooter>
+          <Button variant="outline" @click="showUserPasswordDialog = false">{{ t('common.cancel') }}</Button>
+          <Button :disabled="!userPasswordValue" @click="handleSetUserPassword">{{ t('users.confirm') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <AlertDialog v-model:open="showDeleteUserDialog">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{{ t('users.deleteConfirm') }}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {{ t('users.deleteConfirmDesc', { username: deleteUserTarget?.username }) }}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel>
+          <AlertDialogAction class="bg-destructive text-destructive-foreground hover:bg-destructive/90" @click="handleDeleteUser">
+            {{ t('users.delete') }}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </AppLayout>
 </template>

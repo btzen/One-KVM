@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useSystemStore } from '@/stores/system'
 import { getMicrophone } from '@/composables/useMicrophone'
+import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import {
@@ -53,13 +54,14 @@ import MsdDialog from '@/components/MsdDialog.vue'
 const { t, locale } = useI18n()
 const router = useRouter()
 const systemStore = useSystemStore()
+const authStore = useAuthStore()
 
 const overflowMenuOpen = ref(false)
 
 const hidBackend = computed(() => (systemStore.hid?.backend ?? '').toLowerCase())
 const isCh9329Backend = computed(() => hidBackend.value.includes('ch9329'))
 const showMsd = computed(() => {
-  return !!systemStore.msd?.available && !isCh9329Backend.value
+  return authStore.canConfigure && !!systemStore.msd?.available && !isCh9329Backend.value
 })
 const showAtx = computed(() => systemStore.atx?.available === true)
 
@@ -224,9 +226,11 @@ const collapsibleItems = computed(() => {
   const items = ITEM_SPECS.slice(3).filter(item => {
     if (item.id === 'msd' && !showMsd.value) return false
     if (item.id === 'atx' && !showAtx.value) return false
-    if (item.id === 'paste' && !showPasteText.value) return false
+    if (item.id === 'paste' && (!showPasteText.value || !authStore.canOperate)) return false
     if (item.id === 'stats' && !showStats.value) return false
     if (item.id === 'terminal' && props.showTerminal === false) return false
+    if (item.id === 'extension' && !authStore.canConfigure) return false
+    if (item.id === 'settings' && !authStore.canConfigure) return false
     return true
   })
   return items
@@ -287,8 +291,9 @@ const hasRightOverflow = computed(() => {
     <div ref="barRef" class="flex items-center px-2 sm:px-4 py-1 sm:py-1.5">
       <!-- Left side buttons -->
       <ButtonGroup class="left-buttons flex-1 min-w-0 overflow-hidden">
-        <!-- Video Config - Always visible -->
+        <!-- Video Config - Manager only -->
         <VideoConfigPopover
+          v-if="authStore.canConfigure"
           v-model:open="videoPopoverOpen"
           :video-mode="props.videoMode || 'mjpeg'"
           @update:video-mode="emit('update:videoMode', $event)"
@@ -297,8 +302,9 @@ const hasRightOverflow = computed(() => {
         <!-- Audio Config - Always visible -->
         <AudioConfigPopover v-model:open="audioPopoverOpen" />
 
-        <!-- HID Config - Always visible -->
+        <!-- HID Config - Operator+ -->
         <HidConfigPopover
+          v-if="authStore.canOperate"
           v-model:open="hidPopoverOpen"
           :mouse-mode="mouseMode"
           @update:mouse-mode="emit('toggleMouseMode')"
@@ -461,8 +467,8 @@ const hasRightOverflow = computed(() => {
           class="mr-4 h-5 w-px shrink-0 -translate-x-px self-center bg-border"
         />
 
-        <!-- Virtual Keyboard - Always visible -->
-        <TooltipProvider>
+        <!-- Virtual Keyboard - Operator+ -->
+        <TooltipProvider v-if="authStore.canOperate">
           <Tooltip>
             <TooltipTrigger as-child>
               <Button

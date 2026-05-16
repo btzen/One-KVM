@@ -44,7 +44,20 @@ pub async fn redfish_auth_middleware(
                 if let Some((username, password)) = decode_basic_auth(credentials) {
                     match state.users.verify(&username, &password).await {
                         Ok(Some(user)) => {
-                            request.extensions_mut().insert(user);
+                            let session = match state.sessions.find_by_user(&user.id).await {
+                                Ok(Some(existing)) => existing,
+                                _ => {
+                                    match state.sessions.create(&user.id, user.role).await {
+                                        Ok(s) => s,
+                                        Err(e) => {
+                                            let body = RedfishError::general_error(&e.to_string());
+                                            return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(body))
+                                                .into_response();
+                                        }
+                                    }
+                                }
+                            };
+                            request.extensions_mut().insert(session);
                             return next.run(request).await;
                         }
                         _ => {

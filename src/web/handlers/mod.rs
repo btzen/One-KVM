@@ -16,6 +16,7 @@ mod setup;
 mod stream;
 mod system;
 mod update_api;
+mod users;
 mod webrtc;
 
 pub use account::*;
@@ -31,6 +32,7 @@ pub use setup::*;
 pub use stream::*;
 pub use system::*;
 pub use update_api::*;
+pub use users::*;
 pub use webrtc::*;
 
 use axum::{

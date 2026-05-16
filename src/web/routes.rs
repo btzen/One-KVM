@@ -1,10 +1,10 @@
-#[cfg(unix)]
-use axum::{extract::DefaultBodyLimit, routing::delete};
 use axum::{
     middleware,
-    routing::{any, get, patch, post, put},
+    routing::{any, delete, get, patch, post, put},
     Router,
 };
+#[cfg(unix)]
+use axum::extract::DefaultBodyLimit;
 use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -16,6 +16,7 @@ use super::handlers;
 use super::uac_ws::uac_audio_ws_handler;
 use super::ws::ws_handler;
 use crate::auth::auth_middleware;
+use crate::auth::middleware::{console_middleware, manager_middleware};
 use crate::hid::websocket::ws_hid_handler;
 use crate::state::AppState;
 
@@ -35,7 +36,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .allow_headers(Any);
 
     // Public routes (no auth required)
-    // Note: /info moved to user_routes for security (contains hostname, IPs, etc.)
     let public_routes = Router::new()
         .route("/health", get(handlers::health_check))
         .route("/auth/login", post(handlers::login))
@@ -43,13 +43,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/setup", get(handlers::setup_status))
         .route("/setup/init", post(handlers::setup_init));
 
-    // Authenticated routes (all logged-in users)
+    // Viewer routes (all authenticated users)
+    // Video/audio streaming, self-service (password, TOTP 2FA), read-only status
     let user_routes = Router::new()
         .route("/info", get(handlers::system_info))
         .route("/auth/logout", post(handlers::logout))
         .route("/auth/check", get(handlers::auth_check))
         .route("/auth/password", post(handlers::change_password))
-        .route("/auth/username", post(handlers::change_username))
         .route("/auth/totp", get(handlers::totp_status))
         .route(
             "/auth/totp/enrollment",
@@ -61,21 +61,14 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         )
         .route("/auth/totp/disable", post(handlers::disable_totp))
         .route("/devices", get(handlers::list_devices))
-        // WebSocket endpoint for real-time events
         .route("/ws", any(ws_handler))
-        // Stream control endpoints
+        // Stream control (read + start/stop for viewing)
         .route("/stream/status", get(handlers::stream_state))
         .route("/stream/start", post(handlers::stream_start))
         .route("/stream/stop", post(handlers::stream_stop))
         .route("/stream/mode", get(handlers::stream_mode_get))
-        .route("/stream/mode", post(handlers::stream_mode_set))
-        .route("/stream/bitrate", post(handlers::stream_set_bitrate))
         .route("/stream/codecs", get(handlers::stream_codecs_list))
         .route("/stream/constraints", get(handlers::stream_constraints_get))
-        .route(
-            "/video/encoder/self-check",
-            get(handlers::video_encoder_self_check),
-        )
         // WebRTC endpoints
         .route("/webrtc/session", post(handlers::webrtc_create_session))
         .route("/webrtc/offer", post(handlers::webrtc_offer))
@@ -83,25 +76,43 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/webrtc/ice-servers", get(handlers::webrtc_ice_servers))
         .route("/webrtc/status", get(handlers::webrtc_status))
         .route("/webrtc/close", post(handlers::webrtc_close_session))
-        // HID endpoints
+        // HID status (read-only)
         .route("/hid/status", get(handlers::hid_status))
         .route(
             "/hid/ch9329/descriptor",
             get(handlers::hid_ch9329_descriptor),
         )
-        .route("/hid/reset", post(handlers::hid_reset))
-        // WebSocket HID endpoint (for MJPEG mode)
-        .route("/ws/hid", any(ws_hid_handler))
-        // Audio endpoints
+        // Audio status and stream control
         .route("/audio/status", get(handlers::audio_status))
         .route("/audio/start", post(handlers::start_audio_streaming))
         .route("/audio/stop", post(handlers::stop_audio_streaming))
-        .route("/audio/quality", post(handlers::set_audio_quality))
-        .route("/audio/device", post(handlers::select_audio_device))
         .route("/audio/devices", get(handlers::list_audio_devices))
-        // Audio WebSocket endpoint
+        // Audio WebSocket endpoints
         .route("/ws/audio", any(audio_ws_handler))
-        .route("/ws/uac-audio", any(uac_audio_ws_handler))
+        .route("/ws/uac-audio", any(uac_audio_ws_handler));
+
+    // Unix-only viewer routes (read-only OTG status)
+    #[cfg(unix)]
+    let user_routes = {
+        user_routes
+            .route("/hid/otg/self-check", get(handlers::hid_otg_self_check))
+            .route(
+                "/otg/network/status",
+                get(handlers::config::get_otg_network_status),
+            )
+    };
+
+    // Operator routes (Operate privilege: keyboard/mouse input + power control)
+    let console_routes = Router::new()
+        .route("/ws/hid", any(ws_hid_handler))
+        .route("/hid/reset", post(handlers::hid_reset))
+        .route("/atx/power", post(handlers::atx_power))
+        .route("/atx/wol", post(handlers::atx_wol));
+
+    // Administrator routes (Configure privilege: config, management, user CRUD)
+    let manager_routes = Router::new()
+        // Username change
+        .route("/auth/username", post(handlers::change_username))
         // Configuration management (domain-separated endpoints)
         .route("/config", get(handlers::config::get_all_config))
         .route("/config/video", get(handlers::config::get_video_config))
@@ -122,6 +133,17 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route(
             "/config/audio",
             patch(handlers::config::update_audio_config),
+        )
+        // Audio device/quality control
+        .route("/audio/quality", post(handlers::set_audio_quality))
+        .route("/audio/device", post(handlers::select_audio_device))
+        // Stream mode/bitrate (write)
+        .route("/stream/mode", post(handlers::stream_mode_set))
+        .route("/stream/bitrate", post(handlers::stream_set_bitrate))
+        // Video encoder self-check
+        .route(
+            "/video/encoder/self-check",
+            get(handlers::video_encoder_self_check),
         )
         // RustDesk configuration endpoints
         .route(
@@ -183,6 +205,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // Web server configuration
         .route("/config/web", get(handlers::config::get_web_config))
         .route("/config/web", patch(handlers::config::update_web_config))
+        // Watchdog configuration
         .route(
             "/config/watchdog",
             get(handlers::config::get_watchdog_config),
@@ -191,6 +214,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/config/watchdog",
             patch(handlers::config::update_watchdog_config),
         )
+        // Computer Use Agent
         .route("/config/computer-use", get(handlers::computer_use_config))
         .route(
             "/config/computer-use",
@@ -217,13 +241,20 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/update/overview", get(handlers::update_overview))
         .route("/update/upgrade", post(handlers::update_upgrade))
         .route("/update/status", get(handlers::update_status))
-        // ATX (Power Control) endpoints
+        // ATX status and history
         .route("/atx/status", get(handlers::atx_status))
-        .route("/atx/power", post(handlers::atx_power))
-        .route("/atx/wol", post(handlers::atx_wol))
         .route("/atx/wol/history", get(handlers::atx_wol_history))
         // Device discovery endpoints
         .route("/devices/atx", get(handlers::devices::list_atx_devices))
+        .route(
+            "/devices/network",
+            get(handlers::devices::list_network_interfaces),
+        )
+        .route("/devices/usb", get(handlers::devices::list_usb_devices))
+        .route(
+            "/devices/usb/reset",
+            post(handlers::devices::reset_usb_device),
+        )
         // Extension management endpoints
         .route("/extensions", get(handlers::extensions::list_extensions))
         .route("/extensions/{id}", get(handlers::extensions::get_extension))
@@ -255,16 +286,21 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/extensions/frpc/config",
             patch(handlers::extensions::update_frpc_config),
         )
+        // User management (RBAC CRUD)
+        .route("/users", get(handlers::users::list_users))
+        .route("/users", post(handlers::users::create_user))
+        .route("/users/{user_id}", patch(handlers::users::update_user))
+        .route("/users/{user_id}", delete(handlers::users::delete_user))
         // Terminal (ttyd) reverse proxy - WebSocket and HTTP
         .route("/terminal", get(handlers::terminal::terminal_index))
         .route("/terminal/", get(handlers::terminal::terminal_index))
         .route("/terminal/ws", get(handlers::terminal::terminal_ws))
         .route("/terminal/{*path}", get(handlers::terminal::terminal_proxy));
 
+    // Unix-only administrator routes (MSD, OTG, USB gadgets)
     #[cfg(unix)]
-    let user_routes = {
-        user_routes
-            .route("/hid/otg/self-check", get(handlers::hid_otg_self_check))
+    let manager_routes = {
+        manager_routes
             .route("/config/msd", get(handlers::config::get_msd_config))
             .route("/config/msd", patch(handlers::config::update_msd_config))
             .route("/config/otg", patch(handlers::config::update_otg_config))
@@ -276,18 +312,12 @@ pub fn create_router(state: Arc<AppState>) -> Router {
                 "/config/otg-network",
                 patch(handlers::config::update_otg_network_config),
             )
-            .route(
-                "/otg/network/status",
-                get(handlers::config::get_otg_network_status),
-            )
-            .route(
-                "/config/uac",
-                get(handlers::config::get_uac_config),
-            )
+            .route("/config/uac", get(handlers::config::get_uac_config))
             .route(
                 "/config/uac",
                 patch(handlers::config::update_uac_config),
             )
+            // MSD (Mass Storage Device) endpoints
             .route("/msd/status", get(handlers::msd_status))
             .route("/msd/images", get(handlers::msd_images_list))
             .route("/msd/images/download", post(handlers::msd_image_download))
@@ -318,19 +348,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
                 delete(handlers::msd_drive_file_delete),
             )
             .route("/msd/drive/mkdir/{*path}", post(handlers::msd_drive_mkdir))
-            .route("/devices/usb", get(handlers::devices::list_usb_devices))
-            .route(
-                "/devices/network",
-                get(handlers::devices::list_network_interfaces),
-            )
-            .route(
-                "/devices/usb/reset",
-                post(handlers::devices::reset_usb_device),
-            )
     };
-
-    // Protected routes (all authenticated users)
-    let protected_routes = user_routes;
 
     // Stream endpoints (accessible with auth, but typically embedded in pages)
     let stream_routes = Router::new()
@@ -340,21 +358,40 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 
     // Large file upload routes (MSD images and drive files)
     // Use streaming upload to support files larger than available RAM
-    // Disable body limit for streaming uploads - files are written directly to disk
+    // Require Configure privilege (Administrator)
     #[cfg(unix)]
     let upload_routes = Router::new()
         .route("/msd/images", post(handlers::msd_image_upload))
         .route("/msd/drive/files", post(handlers::msd_drive_upload))
-        .layer(DefaultBodyLimit::disable());
+        .layer(DefaultBodyLimit::disable())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            manager_middleware,
+        ));
     #[cfg(not(unix))]
     let upload_routes = Router::new();
 
-    // Combine API routes
+    // Combine API routes with privilege layers
     let api_routes = Router::new()
         .merge(public_routes)
-        .merge(protected_routes)
+        .merge(user_routes)
         .merge(stream_routes)
         .merge(upload_routes)
+        // Console routes: Operate privilege required (Operator+)
+        .merge(
+            console_routes.layer(middleware::from_fn_with_state(
+                state.clone(),
+                console_middleware,
+            )),
+        )
+        // Manager routes: Configure privilege required (Administrator only)
+        .merge(
+            manager_routes.layer(middleware::from_fn_with_state(
+                state.clone(),
+                manager_middleware,
+            )),
+        )
+        // All above routes require authentication (valid session)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

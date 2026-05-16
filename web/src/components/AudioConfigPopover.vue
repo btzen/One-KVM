@@ -14,6 +14,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Volume2, RefreshCw, Loader2 } from 'lucide-vue-next'
 import { audioApi, configApi } from '@/api'
 import { useConfigStore } from '@/stores/config'
+import { useAuthStore } from '@/stores/auth'
 import { useSystemStore } from '@/stores/system'
 import { getUnifiedAudio } from '@/composables/useUnifiedAudio'
 
@@ -33,6 +34,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const configStore = useConfigStore()
 const systemStore = useSystemStore()
+const authStore = useAuthStore()
 const unifiedAudio = getUnifiedAudio()
 
 const localVolume = ref([unifiedAudio.volume.value * 100])
@@ -182,9 +184,10 @@ watch(() => props.open, (isOpen) => {
         </div>
 
         <!-- Device Settings (requires apply) -->
-        <Separator />
+        <template v-if="authStore.canConfigure">
+          <Separator />
 
-        <div class="space-y-3">
+          <div class="space-y-3">
             <div class="flex items-center justify-between">
               <h5 class="text-xs font-medium text-muted-foreground">
                 {{ t('actionbar.audioDeviceSettings') }}
@@ -284,6 +287,7 @@ watch(() => props.open, (isOpen) => {
               <span>{{ applying ? t('actionbar.applying') : t('common.apply') }}</span>
             </Button>
           </div>
+        </template>
       </div>
     </PopoverContent>
   </Popover>

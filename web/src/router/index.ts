@@ -27,7 +27,7 @@ const routes: RouteRecordRaw[] = [
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/SettingsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresConfigure: true },
   },
 ]
 
@@ -93,6 +93,9 @@ router.beforeEach(async (to, _from, next) => {
       }
     }
 
+    if (to.meta.requiresConfigure && !authStore.canConfigure) {
+      return next({ name: 'Console' })
+    }
   }
 
   next()

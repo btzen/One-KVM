@@ -10,6 +10,7 @@ use tracing::info;
 
 use super::super::schema::*;
 use super::{empty_collection, get_power_state, service_unavailable, validate_id, RESOURCE_ID};
+use crate::auth::{Session, Privilege};
 use crate::state::AppState;
 
 pub(crate) fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
@@ -117,11 +118,18 @@ async fn system_detail(
 
 async fn system_patch(
     State(state): State<Arc<AppState>>,
+    axum::Extension(session): axum::Extension<Session>,
     Path(system_id): Path<String>,
     Json(req): Json<ComputerSystemPatchRequest>,
 ) -> Response {
     if let Some(resp) = validate_id(&system_id) {
         return resp;
+    }
+
+    if !session.has_privilege(Privilege::Configure) {
+        return (StatusCode::FORBIDDEN, axum::Json(RedfishError::general_error(
+            "Insufficient privilege: Configure required",
+        ))).into_response();
     }
 
     if let Some(boot) = &req.boot {
@@ -157,11 +165,18 @@ async fn system_patch(
 
 async fn system_reset(
     State(state): State<Arc<AppState>>,
+    axum::Extension(session): axum::Extension<Session>,
     Path(system_id): Path<String>,
     Json(req): Json<ResetRequest>,
 ) -> Response {
     if let Some(resp) = validate_id(&system_id) {
         return resp;
+    }
+
+    if !session.has_privilege(Privilege::Operate) {
+        return (StatusCode::FORBIDDEN, axum::Json(RedfishError::general_error(
+            "Insufficient privilege: Operate required",
+        ))).into_response();
     }
 
     let result = {
@@ -208,14 +223,20 @@ async fn system_reset(
     }
 }
 
-async fn system_set_default_boot_order(Path(system_id): Path<String>) -> Response {
+async fn system_set_default_boot_order(
+    axum::Extension(session): axum::Extension<Session>,
+    Path(system_id): Path<String>,
+) -> Response {
     if let Some(resp) = validate_id(&system_id) {
         return resp;
     }
 
-    info!(
-        "Redfish: SetDefaultBootOrder for system {} (accepted, no-op)",
-        system_id
-    );
+    if !session.has_privilege(Privilege::Configure) {
+        return (StatusCode::FORBIDDEN, axum::Json(RedfishError::general_error(
+            "Insufficient privilege: Configure required",
+        ))).into_response();
+    }
+
+    info!("Redfish: SetDefaultBootOrder for system {} (accepted, no-op)", system_id);
     StatusCode::NO_CONTENT.into_response()
 }

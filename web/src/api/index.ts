@@ -38,7 +38,7 @@ export const authApi = {
     request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
 
   check: () =>
-    request<{ authenticated: boolean; user?: string }>('/auth/check'),
+    request<{ authenticated: boolean; user?: string; role?: string; privileges?: string[] }>('/auth/check'),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     request<{ success: boolean }>('/auth/password', {
@@ -965,6 +965,34 @@ export const usbApi = {
     request<{ success: boolean; message: string }>('/devices/usb/reset', {
       method: 'POST',
       body: JSON.stringify({ bus_num: busNum, dev_num: devNum }),
+    }),
+}
+
+export interface UserInfo {
+  id: string
+  username: string
+  role: string
+}
+
+export const usersApi = {
+  list: () =>
+    request<UserInfo[]>('/users'),
+
+  create: (data: { username: string; password: string; role?: string }) =>
+    request<{ success: boolean; message?: string }>('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (userId: string, data: { username?: string; password?: string; role?: string }) =>
+    request<{ success: boolean; message?: string }>(`/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (userId: string) =>
+    request<{ success: boolean; message?: string }>(`/users/${userId}`, {
+      method: 'DELETE',
     }),
 }
 
