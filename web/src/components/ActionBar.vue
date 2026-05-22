@@ -229,7 +229,6 @@ const collapsibleItems = computed(() => {
     if (item.id === 'paste' && (!showPasteText.value || !authStore.canOperate)) return false
     if (item.id === 'stats' && !showStats.value) return false
     if (item.id === 'terminal' && props.showTerminal === false) return false
-    if (item.id === 'extension' && !authStore.canConfigure) return false
     if (item.id === 'settings' && !authStore.canConfigure) return false
     return true
   })

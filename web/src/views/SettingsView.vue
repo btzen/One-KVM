@@ -3003,7 +3003,7 @@ watch(isWindows, () => {
 
             <TotpSettingsCard />
 
-            <Card>
+            <Card v-if="authStore.canConfigure">
               <CardHeader class="flex flex-row items-start justify-between space-y-0">
                 <div class="space-y-1.5">
                   <CardTitle>{{ t('users.title') }}</CardTitle>

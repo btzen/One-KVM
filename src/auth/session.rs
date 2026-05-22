@@ -63,8 +63,15 @@ impl SessionStore {
         let revoked = if allow_multiple_sessions {
             Vec::new()
         } else {
-            let ids = guard.keys().cloned().collect();
-            guard.clear();
+            // Only revoke existing sessions for the same user (multi-user safe)
+            let ids: Vec<String> = guard
+                .iter()
+                .filter(|(_, s)| s.user_id == user_id)
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in &ids {
+                guard.remove(id);
+            }
             ids
         };
         guard.insert(session.id.clone(), session.clone());
