@@ -128,7 +128,7 @@ async fn require_privilege(
 
     let body = ErrorResponse {
         success: false,
-        message: format!("Insufficient privilege: {:?} required", privilege),
+        message: format!("Insufficient privilege: {} required", privilege.as_str()),
     };
     Ok((StatusCode::FORBIDDEN, Json(body)).into_response())
 }

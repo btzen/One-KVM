@@ -1002,7 +1002,7 @@ async fn set_user_password(users: &UserStore, sessions: &SessionStore) -> anyhow
     }
 
     users.update_password(&user.id, &new_password).await?;
-    let revoked = sessions.delete_all().await?;
+    let revoked = sessions.delete_by_user(&user.id).await?.len();
 
     tracing::info!(
         "Password updated for user '{}' and {} sessions revoked",

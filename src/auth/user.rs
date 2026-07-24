@@ -120,8 +120,8 @@ impl UserStore {
         Self { pool }
     }
 
-    #[deprecated(note = "Use get_by_id or list_users instead")]
-    /// The single local user, or `None` if none exists.
+    /// The first local user (by rowid), or `None` if none exists.
+    /// Used by CLI admin tools; web API should use `get_by_id` or `list_users`.
     pub async fn single_user(&self) -> Result<Option<User>> {
         let rows: Vec<UserRow> = sqlx::query_as(
             "SELECT id, username, password_hash, role FROM users ORDER BY rowid ASC LIMIT 1",
