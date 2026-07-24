@@ -50,6 +50,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/auth/logout", post(handlers::logout))
         .route("/auth/check", get(handlers::auth_check))
         .route("/auth/password", post(handlers::change_password))
+        .route("/auth/username", post(handlers::change_username))
         .route("/auth/totp", get(handlers::totp_status))
         .route(
             "/auth/totp/enrollment",
@@ -62,10 +63,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/auth/totp/disable", post(handlers::disable_totp))
         .route("/devices", get(handlers::list_devices))
         .route("/ws", any(ws_handler))
-        // Stream control (read + start/stop for viewing)
+        // Stream control (read + start for viewing; stop requires Operate)
         .route("/stream/status", get(handlers::stream_state))
         .route("/stream/start", post(handlers::stream_start))
-        .route("/stream/stop", post(handlers::stream_stop))
         .route("/stream/mode", get(handlers::stream_mode_get))
         .route("/stream/codecs", get(handlers::stream_codecs_list))
         .route("/stream/constraints", get(handlers::stream_constraints_get))
@@ -82,10 +82,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/hid/ch9329/descriptor",
             get(handlers::hid_ch9329_descriptor),
         )
-        // Audio status and stream control
+        // Audio status and stream start (stop requires Operate)
         .route("/audio/status", get(handlers::audio_status))
         .route("/audio/start", post(handlers::start_audio_streaming))
-        .route("/audio/stop", post(handlers::stop_audio_streaming))
         .route("/audio/devices", get(handlers::list_audio_devices))
         // Audio WebSocket endpoints
         .route("/ws/audio", any(audio_ws_handler))
@@ -113,17 +112,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // VNC config read
         .route("/config/vnc", get(handlers::config::get_vnc_config))
         .route("/config/vnc/status", get(handlers::config::get_vnc_status))
-        // Web server / watchdog / auth / redfish config reads
-        .route("/config/web", get(handlers::config::get_web_config))
-        .route(
-            "/config/watchdog",
-            get(handlers::config::get_watchdog_config),
-        )
-        .route("/config/auth", get(handlers::config::get_auth_config))
-        .route(
-            "/config/redfish",
-            get(handlers::config::get_redfish_config),
-        )
         // Computer Use config read
         .route("/config/computer-use", get(handlers::computer_use_config))
         .route("/computer-use/session", get(handlers::computer_use_session))
@@ -132,6 +120,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/atx/wol/history", get(handlers::atx_wol_history))
         // Device discovery (read-only)
         .route("/devices/atx", get(handlers::devices::list_atx_devices))
+        .route(
+            "/devices/network",
+            get(handlers::devices::list_network_interfaces),
+        )
+        .route("/devices/usb", get(handlers::devices::list_usb_devices))
         // Video encoder self-check (read-only)
         .route(
             "/video/encoder/self-check",
@@ -153,12 +146,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
                 get(handlers::config::get_otg_network_config),
             )
             .route("/config/uac", get(handlers::config::get_uac_config))
-            // Device discovery (unix-only, read-only)
-            .route(
-                "/devices/network",
-                get(handlers::devices::list_network_interfaces),
-            )
-            .route("/devices/usb", get(handlers::devices::list_usb_devices))
             // MSD status reads
             .route("/msd/status", get(handlers::msd_status))
             .route("/msd/images", get(handlers::msd_images_list))
@@ -175,13 +162,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     let console_routes = Router::new()
         .route("/ws/hid", any(ws_hid_handler))
         .route("/hid/reset", post(handlers::hid_reset))
+        .route("/stream/stop", post(handlers::stream_stop))
+        .route("/audio/stop", post(handlers::stop_audio_streaming))
         .route("/atx/power", post(handlers::atx_power))
         .route("/atx/wol", post(handlers::atx_wol));
 
     // Administrator routes (Configure privilege: writes, management, user CRUD)
     let manager_routes = Router::new()
-        // Username change
-        .route("/auth/username", post(handlers::change_username))
         // Config writes (Configure privilege required)
         .route(
             "/config/video",
@@ -245,8 +232,25 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/config/rtsp/stop",
             post(handlers::config::stop_rtsp_service),
         )
-        // Web server / watchdog config writes
+        // Auth / Redfish config (sensitive: reads + writes require Configure)
+        .route("/config/auth", get(handlers::config::get_auth_config))
+        .route("/config/auth", patch(handlers::config::update_auth_config))
+        .route(
+            "/config/redfish",
+            get(handlers::config::get_redfish_config),
+        )
+        .route(
+            "/config/redfish",
+            patch(handlers::config::update_redfish_config),
+        )
+        // Web server config (sensitive: exposes TLS/port settings)
+        .route("/config/web", get(handlers::config::get_web_config))
         .route("/config/web", patch(handlers::config::update_web_config))
+        // Watchdog config
+        .route(
+            "/config/watchdog",
+            get(handlers::config::get_watchdog_config),
+        )
         .route(
             "/config/watchdog",
             patch(handlers::config::update_watchdog_config),
@@ -262,17 +266,16 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             post(handlers::computer_use_stop),
         )
         .route("/ws/computer-use", any(handlers::computer_use_ws))
-        // Auth / Redfish config writes
-        .route("/config/auth", patch(handlers::config::update_auth_config))
-        .route(
-            "/config/redfish",
-            patch(handlers::config::update_redfish_config),
-        )
         // System control
         .route("/system/restart", post(handlers::system_restart))
         .route("/update/overview", get(handlers::update_overview))
         .route("/update/upgrade", post(handlers::update_upgrade))
         .route("/update/status", get(handlers::update_status))
+        // USB device reset
+        .route(
+            "/devices/usb/reset",
+            post(handlers::devices::reset_usb_device),
+        )
         // Extension management
         .route("/extensions", get(handlers::extensions::list_extensions))
         .route("/extensions/{id}", get(handlers::extensions::get_extension))
@@ -328,11 +331,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             .route(
                 "/config/uac",
                 patch(handlers::config::update_uac_config),
-            )
-            // USB device reset (unix-only)
-            .route(
-                "/devices/usb/reset",
-                post(handlers::devices::reset_usb_device),
             )
             // MSD write operations
             .route("/msd/images/download", post(handlers::msd_image_download))

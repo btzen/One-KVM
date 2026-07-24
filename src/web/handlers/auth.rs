@@ -158,7 +158,7 @@ pub async fn auth_check(
             .role
             .privileges()
             .iter()
-            .map(|p| format!("{:?}", p))
+            .map(|p| p.as_str().to_string())
             .collect(),
     })
 }

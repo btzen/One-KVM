@@ -76,6 +76,13 @@ impl Privilege {
         Self::Operate,
         Self::Configure,
     ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Operate => "Operate",
+            Self::Configure => "Configure",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,8 +288,8 @@ impl UserStore {
         Ok(())
     }
 
-    pub async fn role_count(&self, role: UserRole) -> Result<u32> {
-        let count: u32 =
+    pub async fn role_count(&self, role: UserRole) -> Result<i64> {
+        let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = ?1")
                 .bind(role.as_str())
                 .fetch_one(&self.pool)

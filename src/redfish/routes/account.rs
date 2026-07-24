@@ -410,7 +410,7 @@ async fn role_detail(Path(role_id): Path<String>) -> Response {
     let privileges: Vec<String> = role
         .privileges()
         .iter()
-        .map(|p| format!("{:?}", p))
+        .map(|p| p.as_str().to_string())
         .collect();
 
     let description = match role {
