@@ -163,6 +163,25 @@ impl SessionStore {
         Ok(removed)
     }
 
+    /// Revoke all sessions of `user_id` except `except_session_id`.
+    /// Used after TOTP/password changes to invalidate the user's other sessions.
+    pub async fn delete_by_user_except(
+        &self,
+        user_id: &str,
+        except_session_id: &str,
+    ) -> Result<Vec<String>> {
+        let mut guard = self.inner.write().await;
+        let removed: Vec<String> = guard
+            .iter()
+            .filter(|(id, s)| id.as_str() != except_session_id && s.user_id == user_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &removed {
+            guard.remove(id);
+        }
+        Ok(removed)
+    }
+
     pub async fn find_by_user(&self, user_id: &str) -> Result<Option<Session>> {
         let guard = self.inner.read().await;
         let found = guard

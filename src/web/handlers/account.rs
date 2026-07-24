@@ -81,7 +81,7 @@ pub async fn confirm_totp_enrollment(
         .two_factor
         .confirm_enrollment(&session.id, &session.user_id, &req.enrollment_id, &req.code)
         .await?;
-    revoke_other_sessions(&state, &session.id).await?;
+    revoke_other_sessions(&state, &session.user_id, &session.id).await?;
     Ok(Json(LoginResponse {
         success: true,
         message: None,
@@ -96,7 +96,7 @@ pub async fn disable_totp(
     let user = authenticated_user(&state, &session).await?;
     verify_current_password(&state, &user, &req.current_password).await?;
     state.two_factor.disable(&user.id, &req.code).await?;
-    revoke_other_sessions(&state, &session.id).await?;
+    revoke_other_sessions(&state, &session.user_id, &session.id).await?;
     Ok(Json(LoginResponse {
         success: true,
         message: None,
@@ -129,8 +129,15 @@ async fn verify_current_password(
     Ok(())
 }
 
-async fn revoke_other_sessions(state: &Arc<AppState>, current_session_id: &str) -> Result<()> {
-    let revoked = state.sessions.delete_all_except(current_session_id).await?;
+async fn revoke_other_sessions(
+    state: &Arc<AppState>,
+    user_id: &str,
+    current_session_id: &str,
+) -> Result<()> {
+    let revoked = state
+        .sessions
+        .delete_by_user_except(user_id, current_session_id)
+        .await?;
     state.remember_revoked_sessions(revoked).await;
     Ok(())
 }

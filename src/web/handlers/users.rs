@@ -56,6 +56,8 @@ pub async fn update_user(
     axum::extract::Path(user_id): axum::extract::Path<String>,
     Json(req): Json<UpdateUserRequest>,
 ) -> Result<Json<LoginResponse>> {
+    let mut need_session_revoke = false;
+
     if let Some(ref username) = req.username {
         state.users.update_username(&user_id, username).await?;
     }
@@ -67,6 +69,7 @@ pub async fn update_user(
             ));
         }
         state.users.update_password(&user_id, password).await?;
+        need_session_revoke = true;
     }
 
     if let Some(ref role_str) = req.role {
@@ -95,6 +98,12 @@ pub async fn update_user(
         }
 
         state.users.update_role(&user_id, new_role).await?;
+        need_session_revoke = true;
+    }
+
+    if need_session_revoke {
+        let revoked = state.sessions.delete_by_user(&user_id).await?;
+        state.remember_revoked_sessions(revoked).await;
     }
 
     info!("User {} updated by {}", user_id, session.user_id);

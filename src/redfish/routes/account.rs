@@ -220,6 +220,8 @@ async fn account_update(
         ))).into_response();
     }
 
+    let mut need_session_revoke = false;
+
     if let Some(ref role_str) = req.role_id {
         if account_id == session.user_id {
             let new_role = UserRole::from_str(role_str).unwrap_or(UserRole::Viewer);
@@ -248,6 +250,7 @@ async fn account_update(
             )
                 .into_response();
         }
+        need_session_revoke = true;
     }
 
     if let Some(ref role_str) = req.role_id {
@@ -303,6 +306,12 @@ async fn account_update(
             )
                 .into_response();
         }
+        need_session_revoke = true;
+    }
+
+    if need_session_revoke {
+        let revoked = state.sessions.delete_by_user(&account_id).await.unwrap_or_default();
+        state.remember_revoked_sessions(revoked).await;
     }
 
     info!("Redfish: Account {} updated", account_id);
