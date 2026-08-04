@@ -527,7 +527,7 @@ const hasRightOverflow = computed(() => {
             </DropdownMenuItem>
 
             <!-- Paste -->
-            <DropdownMenuItem v-if="showPasteText && !isVisible('paste')" @click="openMobilePaste">
+            <DropdownMenuItem v-if="showPasteText && authStore.canOperate && !isVisible('paste')" @click="openMobilePaste">
               <ClipboardPaste class="size-4 mr-2" />
               {{ t('actionbar.paste') }}
             </DropdownMenuItem>
@@ -551,7 +551,7 @@ const hasRightOverflow = computed(() => {
             </DropdownMenuItem>
 
             <!-- Settings -->
-            <DropdownMenuItem v-if="!isVisible('settings')" @click="openFromOverflow(() => router.push('/settings'))">
+            <DropdownMenuItem v-if="authStore.canConfigure && !isVisible('settings')" @click="openFromOverflow(() => router.push('/settings'))">
               <Settings class="size-4 mr-2" />
               {{ t('actionbar.settings') }}
             </DropdownMenuItem>
