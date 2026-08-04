@@ -59,6 +59,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function refreshPrivileges() {
+    try {
+      const result = await authApi.check()
+      role.value = result.role || null
+      privileges.value = (result.privileges as Privilege[]) || []
+    } catch {
+      // Session cookie is valid (login just succeeded); leave privileges empty on transient error.
+    }
+  }
+
   async function beginLogin(username: string, password: string): Promise<AuthLoginResponse | null> {
     loading.value = true
     error.value = null
@@ -69,6 +79,7 @@ export const useAuthStore = defineStore('auth', () => {
         isAuthenticated.value = true
         user.value = username
         pendingUsername = null
+        await refreshPrivileges()
       } else {
         isAuthenticated.value = false
         user.value = null
@@ -96,6 +107,7 @@ export const useAuthStore = defineStore('auth', () => {
       isAuthenticated.value = true
       user.value = pendingUsername
       pendingUsername = null
+      await refreshPrivileges()
       return true
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Login failed'
