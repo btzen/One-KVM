@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::super::schema::*;
-use super::{empty_collection, resource_not_found, service_unavailable, validate_id};
+use super::{empty_collection, resource_not_found, validate_id};
 use crate::auth::{Session, Privilege};
 use crate::error::{AppError, MsdErrorCode};
 use crate::msd::{ImageInfo, ImageManager, MountedMedia, MountedMediaKind};
