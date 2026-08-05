@@ -1,15 +1,10 @@
 #[cfg(unix)]
-use axum::{
-    extract::DefaultBodyLimit,
-    routing::{delete, put},
-};
+use axum::extract::DefaultBodyLimit;
 use axum::{
     middleware,
     routing::{any, delete, get, patch, post, put},
     Router,
 };
-#[cfg(unix)]
-use axum::extract::DefaultBodyLimit;
 use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
