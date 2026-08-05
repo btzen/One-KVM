@@ -1,3 +1,8 @@
+#[cfg(unix)]
+use axum::{
+    extract::DefaultBodyLimit,
+    routing::{delete, put},
+};
 use axum::{
     middleware,
     routing::{any, delete, get, patch, post, put},
@@ -13,6 +18,7 @@ use tower_http::{
 
 use super::audio_ws::audio_ws_handler;
 use super::handlers;
+#[cfg(unix)]
 use super::uac_ws::uac_audio_ws_handler;
 use super::ws::ws_handler;
 use crate::auth::auth_middleware;
@@ -62,12 +68,14 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         )
         .route("/auth/totp/disable", post(handlers::disable_totp))
         .route("/devices", get(handlers::list_devices))
+        .route("/video/input-status", get(handlers::video_input_status))
         .route("/ws", any(ws_handler))
         // Stream control (read + start for viewing; stop requires Operate)
         .route("/stream/status", get(handlers::stream_state))
         .route("/stream/start", post(handlers::stream_start))
         .route("/stream/mode", get(handlers::stream_mode_get))
         .route("/stream/codecs", get(handlers::stream_codecs_list))
+        .route("/video/codecs", get(handlers::stream_codecs_list))
         .route("/stream/constraints", get(handlers::stream_constraints_get))
         // WebRTC endpoints
         .route("/webrtc/session", post(handlers::webrtc_create_session))
