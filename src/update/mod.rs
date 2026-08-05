@@ -12,7 +12,7 @@ use tokio::sync::{broadcast, RwLock, Semaphore};
 use crate::error::{AppError, Result};
 use crate::state::ShutdownAction;
 
-const DEFAULT_UPDATE_BASE_URL: &str = "https://update.one-kvm.cn";
+const DEFAULT_UPDATE_BASE_URL: &str = "";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
