@@ -294,6 +294,7 @@ onUnmounted(() => {
               {{ applying ? t('actionbar.applying') : t('common.apply') }}
             </Button>
           </template>
+        </div>
       </div>
     </PopoverContent>
   </Popover>
